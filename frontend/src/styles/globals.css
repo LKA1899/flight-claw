@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-2xl border border-[#eadfd5] bg-white/90 shadow-sm transition-shadow hover:shadow-soft;
+  }
+
+  .muted-panel {
+    @apply rounded-2xl border border-[#eadfd5] bg-[#fbf8f4];
+  }
+
+  .table-shell {
+    @apply rounded-2xl border border-[#eadfd5] bg-white/90 shadow-sm;
+  }
+
+  .table-scroll {
+    @apply overflow-x-auto;
+    scrollbar-width: thin;
+    scrollbar-color: #d6ccc0 transparent;
+  }
+
+  .table-scroll::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .table-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 4px;
+  }
+
+  .table-scroll::-webkit-scrollbar-thumb {
+    background: #d6ccc0;
+    border-radius: 4px;
+  }
+
+  .table-scroll::-webkit-scrollbar-thumb:hover {
+    background: #c4b5a5;
+  }
+
+  .table-scroll table {
+    min-width: max-content;
+  }
+
+  .status-dot {
+    @apply h-2 w-2 rounded-full;
+  }
+}

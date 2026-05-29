@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlightClaw Web Console High-Fidelity Prototype</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #e5eaf2;
+      --line-dark: #d6deea;
+      --text: #172033;
+      --muted: #667085;
+      --subtle: #98a2b3;
+      --blue: #1769e0;
+      --blue-2: #0f4fb8;
+      --blue-soft: #eaf2ff;
+      --green: #17a56b;
+      --green-soft: #eaf8f1;
+      --red: #d92d20;
+      --red-soft: #fff0ed;
+      --orange: #f79009;
+      --orange-soft: #fff7e6;
+      --gray-soft: #eef2f7;
+      --shadow: 0 8px 24px rgba(16, 24, 40, .06);
+      --radius: 8px;
+      --nav: #0f172a;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    a { color: inherit; text-decoration: none; }
+    .prototype-shell {
+      display: grid;
+      grid-template-columns: 276px minmax(980px, 1fr);
+      min-height: 100vh;
+    }
+    .prototype-nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      background: #0b1220;
+      color: #d7deea;
+      padding: 22px 18px;
+      border-right: 1px solid rgba(255, 255, 255, .08);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, #1769e0, #5ba0ff);
+      font-size: 13px;
+      letter-spacing: .02em;
+    }
+    .nav-caption {
+      margin: 22px 10px 8px;
+      color: #7d8aa0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .prototype-nav a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 10px;
+      margin: 2px 0;
+      border-radius: 7px;
+      color: #d7deea;
+    }
+    .prototype-nav a:hover,
+    .prototype-nav a.active {
+      background: rgba(255, 255, 255, .08);
+      color: #fff;
+    }
+    .prototype-nav code {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+    .prototype-main {
+      padding: 24px 28px 64px;
+      overflow: auto;
+    }
+    .intro {
+      max-width: 1440px;
+      margin: 0 auto 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+    .intro h1 { margin: 0 0 8px; font-size: 28px; }
+    .intro p { margin: 0; color: var(--muted); }
+    .ia-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .spec-card, .screen-note {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .spec-card h3, .screen-note h3 { margin: 0 0 10px; font-size: 15px; }
+    .spec-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+    }
+    .screen {
+      width: 1440px;
+      margin: 0 auto 42px;
+      background: #f5f7fb;
+      border: 1px solid var(--line-dark);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 14px 40px rgba(16, 24, 40, .08);
+    }
+    .screen-title {
+      width: 1440px;
+      margin: 30px auto 10px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+    }
+    .screen-title h2 { margin: 0; font-size: 22px; }
+    .screen-title p { margin: 4px 0 0; color: var(--muted); }
+    .console {
+      display: grid;
+      grid-template-columns: 236px 1fr;
+      min-height: 900px;
+    }
+    .side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 18px 14px;
+    }
+    .side-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 42px;
+      padding: 0 8px;
+      margin-bottom: 16px;
+      font-weight: 700;
+      font-size: 17px;
+    }
+    .side-logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+    }
+    .side-group { margin-top: 16px; }
+    .side-label {
+      padding: 0 10px 8px;
+      color: var(--subtle);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .side-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 36px;
+      padding: 0 10px;
+      border-radius: 7px;
+      color: #344054;
+      margin: 2px 0;
+    }
+    .side-item.active {
+      background: var(--blue-soft);
+      color: var(--blue-2);
+      font-weight: 600;
+    }
+    .side-icon {
+      width: 18px;
+      color: #8a98ad;
+      text-align: center;
+    }
+    .content {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      height: 64px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      gap: 18px;
+    }
+    .page-heading {
+      min-width: 190px;
+    }
+    .page-heading strong { display: block; font-size: 18px; }
+    .page-heading span { color: var(--muted); font-size: 12px; }
+    .search {
+      flex: 1;
+      height: 36px;
+      max-width: 420px;
+      border: 1px solid var(--line-dark);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      color: var(--subtle);
+      background: #fbfcfe;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+    }
+    .main {
+      padding: 24px;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .toolbar h3 { margin: 0; font-size: 22px; }
+    .toolbar p { margin: 4px 0 0; color: var(--muted); }
+    .btn {
+      height: 34px;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border-radius: 7px;
+      border: 1px solid var(--line-dark);
+      background: #fff;
+      color: #344054;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .btn.danger { color: var(--red); border-color: #f5c6c0; background: #fff; }
+    .btn.disabled { opacity: .45; }
+    .btn.ghost { background: transparent; border-color: transparent; color: var(--blue); }
+    .chip-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #475467;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .03);
+      padding: 16px;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .card-title { font-weight: 700; font-size: 15px; }
+    .metric-label { color: var(--muted); font-size: 13px; }
+    .metric-value { margin-top: 8px; font-size: 28px; font-weight: 750; letter-spacing: -.01em; }
+    .metric-foot { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 24px;
+      border-radius: 12px;
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .success { color: var(--green); background: var(--green-soft); border-color: #bcebd5; }
+    .failed { color: var(--red); background: var(--red-soft); border-color: #ffd1ca; }
+    .running { color: var(--blue); background: var(--blue-soft); border-color: #bdd7ff; }
+    .pending { color: #667085; background: var(--gray-soft); border-color: #d7dee8; }
+    .partial { color: #b54708; background: var(--orange-soft); border-color: #fedf89; }
+    .risk-low { color: var(--green); background: var(--green-soft); }
+    .risk-mid { color: #b54708; background: var(--orange-soft); }
+    .risk-high { color: var(--red); background: var(--red-soft); }
+    .table-wrap {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      height: 42px;
+      background: #f8fafc;
+      color: #667085;
+      font-weight: 700;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 0 12px;
+      white-space: nowrap;
+    }
+    td {
+      height: 56px;
+      border-bottom: 1px solid #edf1f7;
+      padding: 8px 12px;
+      vertical-align: middle;
+      color: #344054;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .route-main { color: var(--text); font-weight: 700; }
+    .route-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .price { font-weight: 750; color: #101828; font-size: 15px; }
+    .trend-down { color: var(--green); font-size: 12px; }
+    .trend-up { color: var(--red); font-size: 12px; }
+    .muted { color: var(--muted); }
+    .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #edf2f7;
+      overflow: hidden;
+    }
+    .progress > span { display: block; height: 100%; background: var(--blue); border-radius: 999px; }
+    .progress.green > span { background: var(--green); }
+    .progress.orange > span { background: var(--orange); }
+    .bars { display: grid; gap: 10px; }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 96px 1fr 42px;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .alert {
+      border: 1px solid #fedf89;
+      background: #fffbeb;
+      color: #92400e;
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .alert.red {
+      border-color: #ffd1ca;
+      background: #fff5f5;
+      color: #b42318;
+    }
+    .opportunity {
+      display: grid;
+      grid-template-columns: 1.2fr .7fr .7fr .7fr auto;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 0;
+      border-top: 1px solid #edf1f7;
+    }
+    .opportunity:first-of-type { border-top: 0; padding-top: 0; }
+    .steps {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .step-node {
+      min-width: 128px;
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      position: relative;
+    }
+    .step-node::after {
+      content: "";
+      position: absolute;
+      top: 32px;
+      right: -11px;
+      width: 10px;
+      height: 1px;
+      background: var(--line-dark);
+    }
+    .step-node:last-child::after { display: none; }
+    .step-code { font-weight: 750; font-size: 12px; color: #101828; }
+    .step-name { margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .step-meta { margin-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .field label {
+      display: block;
+      color: #344054;
+      font-weight: 650;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .input, .select, .textarea {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line-dark);
+      border-radius: 7px;
+      background: #fff;
+      padding: 8px 10px;
+      color: #344054;
+    }
+    .textarea { min-height: 84px; }
+    .field-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .stepper {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .stepper-item {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: var(--radius);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .stepper-index {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: 750;
+      font-size: 12px;
+    }
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+    }
+    .day {
+      min-height: 72px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 8px;
+      font-size: 12px;
+    }
+    .day strong { display: block; margin-bottom: 8px; }
+    .day.disabled { background: #f8fafc; color: var(--subtle); }
+    .chart {
+      height: 220px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(#edf1f7 1px, transparent 1px) 0 0 / 100% 44px,
+        linear-gradient(90deg, #edf1f7 1px, transparent 1px) 0 0 / 90px 100%,
+        #fff;
+      position: relative;
+      overflow: hidden;
+    }
+    .chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .json-box {
+      background: #0f172a;
+      color: #cbd5e1;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 220px;
+      white-space: pre-wrap;
+    }
+    .report-body {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+    .report-body h4 { margin: 20px 0 8px; font-size: 17px; }
+    .report-body h4:first-child { margin-top: 0; }
+    .report-body p, .report-body li { color: #344054; }
+    .flow {
+      display: grid;
+      gap: 10px;
+    }
+    .flow-row {
+      display: grid;
+      grid-template-columns: 220px 1fr 220px;
+      gap: 12px;
+      align-items: center;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .component-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .tokens {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .swatch {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .swatch-color { height: 48px; }
+    .swatch div:last-child { padding: 8px; font-size: 12px; color: var(--muted); }
+    .footer-note {
+      width: 1440px;
+      margin: 0 auto;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-shell">
+    <aside class="prototype-nav">
+      <div class="brand"><span class="brand-mark">FC</span>FlightClaw 原型</div>
+      <div class="nav-caption">Information</div>
+      <a href="#ia">信息架构 <code>IA</code></a>
+      <a href="#components">关键组件 <code>UI</code></a>
+      <a href="#flow">跳转关系 <code>Flow</code></a>
+      <a href="#spec">设计规范 <code>Spec</code></a>
+      <div class="nav-caption">Screens</div>
+      <a href="#overview" class="active">Overview <code>01</code></a>
+      <a href="#monitors">Monitors <code>02</code></a>
+      <a href="#monitor-detail">Monitor Detail <code>03</code></a>
+      <a href="#monitor-form">Create Monitor <code>04</code></a>
+      <a href="#workflows">Workflows <code>05</code></a>
+      <a href="#workflow-detail">Workflow Detail <code>06</code></a>
+      <a href="#workflow-runs">Workflow Runs <code>07</code></a>
+      <a href="#run-detail">Run Detail <code>08</code></a>
+      <a href="#tasks">Query Tasks <code>09</code></a>
+      <a href="#prices">Price Results <code>10</code></a>
+      <a href="#reports">Reports <code>11</code></a>
+      <a href="#settings">Settings <code>12</code></a>
+    </aside>
+
+    <main class="prototype-main">
+      <section class="intro" id="ia">
+        <h1>FlightClaw Web 控制台高保真原型</h1>
+        <p>定位为个人机票监控 Workflow 控制台。界面强调资源管理、任务执行链路、低频本地浏览器查询、截图/HTML 可追溯、人工接管与报告分析。</p>
+        <div class="ia-grid">
+          <div class="spec-card">
+            <h3>完整信息架构</h3>
+            <ul class="spec-list">
+              <li>Overview：总览仪表盘</li>
+              <li>Monitors：机票监控配置</li>
+              <li>Workflows：工作流定义</li>
+              <li>Workflow Runs：执行记录</li>
+              <li>Query Tasks：浏览器查询任务</li>
+              <li>Price Results：原始价格结果</li>
+              <li>Reports：分析报告</li>
+              <li>Settings：本地运行参数</li>
+            </ul>
+          </div>
+          <div class="spec-card">
+            <h3>页面清单</h3>
+            <ul class="spec-list">
+              <li>01 Overview</li>
+              <li>02 Monitors 列表</li>
+              <li>03 Monitor 详情</li>
+              <li>04 新建/编辑 Monitor</li>
+              <li>05 Workflows 列表</li>
+              <li>06 Workflow 详情</li>
+              <li>07 Workflow Runs</li>
+              <li>08 Workflow Run Detail</li>
+              <li>09 Query Tasks</li>
+              <li>10 Price Results</li>
+              <li>11 Reports</li>
+              <li>12 Settings</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <div class="screen-title" id="overview">
+        <div><h2>01 Overview 总览页</h2><p>打开系统后立即看到监控规模、今日执行质量、低价机会与风险阻断。</p></div>
+        <span class="status running"><span class="dot"></span>1 workflow running</span>
+      </div>
+      <section class="screen">
+        <div class="console">
+          <aside class="side">
+            <div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div>
+            <div class="side-group">
+              <div class="side-label">Console</div>
+              <div class="side-item active"><span class="side-icon">□</span>Overview</div>
+              <div class="side-item"><span class="side-icon">◎</span>Monitors</div>
+              <div class="side-item"><span class="side-icon">◇</span>Workflows</div>
+              <div class="side-item"><span class="side-icon">≡</span>Workflow Runs</div>
+              <div class="side-item"><span class="side-icon">▦</span>Query Tasks</div>
+              <div class="side-item"><span class="side-icon">¥</span>Price Results</div>
+              <div class="side-item"><span class="side-icon">¶</span>Reports</div>
+              <div class="side-item"><span class="side-icon">⚙</span>Settings</div>
+            </div>
+          </aside>
+          <div class="content">
+            <header class="topbar">
+              <div class="page-heading"><strong>Overview</strong><span>生产级机票监控 Workflow 控制台</span></div>
+              <div class="search">搜索 Monitor / Run No / Batch / Report</div>
+              <div class="top-actions">
+                <span class="chip">Local Mode</span><span class="chip">SQLite</span><span class="chip">Browser Profile Ready</span>
+                <button class="btn">New Monitor</button><button class="btn primary">Run Workflow</button>
+              </div>
+            </header>
+            <main class="main">
+              <div class="grid-4">
+                <div class="card"><div class="metric-label">Active Monitors</div><div class="metric-value">12</div><div class="metric-foot">3 条航线今日启用查询</div></div>
+                <div class="card"><div class="metric-label">Today Tasks</div><div class="metric-value">48</div><div class="metric-foot">36 success, 4 failed, 8 pending</div></div>
+                <div class="card"><div class="metric-label">Success Rate</div><div class="metric-value">92.3%</div><div class="metric-foot trend-down">较昨日 +4.1%</div></div>
+                <div class="card"><div class="metric-label">Price Drops</div><div class="metric-value">2</div><div class="metric-foot">发现低于预算机会</div></div>
+              </div>
+              <div style="height:16px"></div>
+              <div class="grid-2">
+                <div class="card">
+                  <div class="card-header"><div class="card-title">Today’s Best Opportunities</div><button class="btn ghost">View all reports</button></div>
+                  <div class="opportunity">
+                    <div><div class="route-main">北京 → 东京</div><div class="route-sub">PEK,PKX → NRT,HND · 2026-06-01</div></div>
+                    <div><div class="price">¥1380</div><div class="trend-down">↓ 较昨日 ¥320</div></div>
+                    <span class="status risk-low">LOW</span>
+                    <div class="muted">直飞优先</div>
+                    <button class="btn">查看报告</button>
+                  </div>
+                  <div class="opportunity">
+                    <div><div class="route-main">上海 → 曼谷</div><div class="route-sub">PVG,SHA → BKK,DMK · 2026-07-05</div></div>
+                    <div><div class="price">¥920</div><div class="trend-down">低于预算 28%</div></div>
+                    <span class="status risk-mid">MEDIUM</span>
+                    <div class="muted">Train+ 候选</div>
+                    <button class="btn">查看报告</button>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><div class="card-title">最近 Workflow 执行</div><span class="status running"><span class="dot"></span>RUNNING</span></div>
+                  <table>
+                    <tr><th>Run No</th><th>Workflow</th><th>Start</th><th>Duration</th></tr>
+                    <tr><td class="mono">RUN-20260522-009</td><td>Daily Flight Monitor Workflow</td><td>09:00:12</td><td>11m 42s</td></tr>
+                  </table>
+                  <div style="height:14px"></div>
+                  <div class="steps">
+                    <div class="step-node"><div class="step-code">LOAD_MONITORS</div><div class="step-name">已完成</div><div class="step-meta"><span class="status success">SUCCESS</span><span class="mono">0.2s</span></div></div>
+                    <div class="step-node"><div class="step-code">GENERATE_TASKS</div><div class="step-name">生成 48 tasks</div><div class="step-meta"><span class="status success">SUCCESS</span><span class="mono">1.4s</span></div></div>
+                    <div class="step-node"><div class="step-code">RUN_CTRIP_SEARCH</div><div class="step-name">本地浏览器串行查询</div><div class="step-meta"><span class="status running">RUNNING</span><span class="mono">10m</span></div></div>
+                  </div>
+                  <div style="height:12px"></div><div class="progress"><span style="width:48%"></span></div>
+                </div>
+              </div>
+              <div style="height:16px"></div>
+              <div class="grid-2">
+                <div class="card"><div class="card-header"><div class="card-title">任务状态分布</div><span class="muted">Today batch FC-20260522-AM</span></div>
+                  <div class="bars">
+                    <div class="bar-row"><span>PENDING</span><div class="progress"><span style="width:16%;background:#98a2b3"></span></div><strong>8</strong></div>
+                    <div class="bar-row"><span>RUNNING</span><div class="progress"><span style="width:4%"></span></div><strong>2</strong></div>
+                    <div class="bar-row"><span>SUCCESS</span><div class="progress green"><span style="width:75%"></span></div><strong>36</strong></div>
+                    <div class="bar-row"><span>FAILED</span><div class="progress"><span style="width:8%;background:#d92d20"></span></div><strong>4</strong></div>
+                  </div>
+                </div>
+                <div class="card"><div class="card-header"><div class="card-title">风险提示</div><span class="status partial">PARTIAL_SUCCESS</span></div>
+                  <div class="alert"><div><strong>3 个任务需要人工接管</strong><br>携程登录态过期或出现验证码，本地浏览器窗口等待用户处理。</div><button class="btn">查看任务</button></div>
+                  <div class="chip-row"><span class="chip">验证码/登录阻断 2</span><span class="chip">解析失败 1</span><span class="chip">HTML 已保存 48</span><span class="chip">Screenshot 可追溯 44</span></div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </section>
+
+      <div class="screen-title" id="monitors"><div><h2>02 Monitors 列表页</h2><p>管理航线监控配置，突出路线、策略、预算、最近执行和风险模式。</p></div></div>
+      <section class="screen">
+        <div class="console">
+          <aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item active">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside>
+          <div class="content">
+            <header class="topbar"><div class="page-heading"><strong>Monitors</strong><span>Manage flight route monitors and query strategies.</span></div><div class="search">搜索 Monitor Name / Route</div><div class="top-actions"><span class="chip">No workflow running</span><button class="btn">Run selected</button><button class="btn primary">New Monitor</button></div></header>
+            <main class="main">
+              <div class="toolbar"><div><h3>Monitors</h3><p>按平台、启用状态、查询策略和风险模式筛选。</p></div><div class="chip-row"><span class="chip">Platform: CTRIP</span><span class="chip">Enabled: All</span><span class="chip">Strategy: All</span><span class="chip">Risk Mode: All</span></div></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th><input type="checkbox"></th><th>Monitor Name</th><th>Route</th><th>Dates</th><th>Platform</th><th>Strategy</th><th>Max Price</th><th>Enabled</th><th>Last Run</th><th>Last Best Price</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    <tr><td><input type="checkbox"></td><td><strong>北京 → 东京六月低价监控</strong><div class="route-sub">每日 09:00</div></td><td><div class="route-main">北京 → 东京</div><div class="route-sub">PEK,PKX → NRT,HND</div></td><td>10 enabled / 12 total</td><td><span class="chip">CTRIP</span></td><td><span class="chip">Direct</span><span class="chip">Transfer</span></td><td>¥1800</td><td><span class="status success">Enabled</span></td><td>RUN-009</td><td><div class="price">¥1380</div><div class="trend-down">↓ ¥320</div></td><td><button class="btn">View</button> <button class="btn">Dates</button> <button class="btn primary">Run</button> <button class="btn">More</button></td></tr>
+                    <tr><td><input type="checkbox"></td><td><strong>上海 → 曼谷暑期预算</strong><div class="route-sub">低价提醒开启</div></td><td><div class="route-main">上海 → 曼谷</div><div class="route-sub">PVG,SHA → BKK,DMK</div></td><td>8 enabled / 8 total</td><td><span class="chip">CTRIP</span></td><td><span class="chip">Direct</span><span class="chip">Train+</span></td><td>¥1280</td><td><span class="status success">Enabled</span></td><td>RUN-008</td><td><div class="price">¥920</div><div class="trend-down">↓ 28%</div></td><td><button class="btn">View</button> <button class="btn">Dates</button> <button class="btn primary">Run</button> <button class="btn">More</button></td></tr>
+                    <tr><td><input type="checkbox"></td><td><strong>广州 → 大阪樱花季</strong><div class="route-sub">高风险策略需确认</div></td><td><div class="route-main">广州 → 大阪</div><div class="route-sub">CAN → KIX,ITM</div></td><td>14 enabled / 18 total</td><td><span class="chip">CTRIP</span></td><td><span class="chip">Transfer</span><span class="status risk-high">Hidden-city</span></td><td>¥2200</td><td><span class="status pending">Disabled</span></td><td>RUN-006</td><td><div class="price">¥1680</div><div class="trend-up">↑ ¥120</div></td><td><button class="btn">View</button> <button class="btn">Dates</button> <button class="btn">Run</button> <button class="btn">More</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </main>
+          </div>
+        </div>
+      </section>
+
+      <div class="screen-title" id="monitor-detail"><div><h2>03 Monitor 详情页</h2><p>完整配置、日期、策略、历史表现和最近任务。</p></div></div>
+      <section class="screen">
+        <div class="console">
+          <aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item active">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside>
+          <div class="content">
+            <header class="topbar"><div class="page-heading"><strong>北京 → 东京六月低价监控</strong><span>PEK,PKX → NRT,HND · CTRIP</span></div><div class="search">搜索该 Monitor 下的任务/日期</div><div class="top-actions"><span class="status success">Enabled</span><button class="btn">Edit</button><button class="btn primary">Run Monitor</button></div></header>
+            <main class="main">
+              <div class="grid-3">
+                <div class="card"><div class="card-title">配置摘要</div><table><tr><td>出发城市</td><td><strong>北京 PEK,PKX</strong></td></tr><tr><td>到达城市</td><td><strong>东京 NRT,HND</strong></td></tr><tr><td>平台</td><td>CTRIP</td></tr><tr><td>预算</td><td>¥1800</td></tr><tr><td>最大耗时</td><td>8h 30m</td></tr><tr><td>最大中转</td><td>1 次</td></tr></table></div>
+                <div class="card"><div class="card-title">策略</div><div style="height:12px"></div><div class="chip-row"><span class="status success">Direct enabled</span><span class="status success">Transfer enabled</span><span class="status partial">Train positioning enabled</span><span class="status pending">Hidden-city disabled</span></div><div style="height:18px"></div><div class="alert">Train+ 会把火车接驳成本和 180 分钟换乘缓冲计入总价与总耗时。</div></div>
+                <div class="card"><div class="card-title">历史表现</div><div class="grid-3" style="margin-top:12px"><div><div class="metric-label">最近最低价</div><div class="metric-value">¥1380</div></div><div><div class="metric-label">平均价</div><div class="metric-value">¥1724</div></div><div><div class="metric-label">当前最佳</div><div class="metric-value">¥1380</div></div></div></div>
+              </div>
+              <div style="height:16px"></div>
+              <div class="grid-2">
+                <div class="card"><div class="card-header"><div class="card-title">查询日期</div><button class="btn">Manage Dates</button></div><div class="calendar">
+                  <div class="day"><strong>06-01</strong><span class="status success">price dropped</span></div><div class="day"><strong>06-02</strong><span class="status success">queried today</span></div><div class="day"><strong>06-03</strong><span class="status pending">enabled</span></div><div class="day disabled"><strong>06-04</strong>disabled</div><div class="day"><strong>06-05</strong><span class="status running">querying</span></div><div class="day"><strong>06-06</strong><span class="status pending">enabled</span></div><div class="day"><strong>06-07</strong><span class="status failed">parse failed</span></div>
+                </div></div>
+                <div class="card"><div class="card-header"><div class="card-title">历史价格趋势</div><span class="muted">最近 14 天</span></div><div class="chart"><svg viewBox="0 0 640 220"><polyline points="10,140 80,136 150,150 220,128 290,118 360,124 430,98 500,116 570,76 630,52" fill="none" stroke="#1769e0" stroke-width="3"/><circle cx="630" cy="52" r="5" fill="#1769e0"/></svg></div></div>
+              </div>
+              <div style="height:16px"></div>
+              <div class="card"><div class="card-header"><div class="card-title">最近 5 条 Query Task</div><button class="btn">View all tasks</button></div><table><tr><th>Task ID</th><th>Date</th><th>Type</th><th>Status</th><th>Snapshot</th><th>HTML</th><th>Created</th></tr><tr><td class="mono">TASK-1042</td><td>2026-06-01</td><td>DIRECT</td><td><span class="status success">SUCCESS</span></td><td><button class="btn">Screenshot</button></td><td><button class="btn">HTML</button></td><td>09:04</td></tr><tr><td class="mono">TASK-1043</td><td>2026-06-05</td><td>TRANSFER</td><td><span class="status running">RUNNING</span></td><td>-</td><td>-</td><td>09:06</td></tr></table></div>
+            </main>
+          </div>
+        </div>
+      </section>
+
+      <div class="screen-title" id="monitor-form"><div><h2>04 新建 / 编辑 Monitor 页面</h2><p>云资源创建向导式 Step Form，分组配置航线、日期、策略和风险确认。</p></div></div>
+      <section class="screen">
+        <div class="console">
+          <aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item active">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside>
+          <div class="content">
+            <header class="topbar"><div class="page-heading"><strong>Create Monitor</strong><span>像创建云资源一样配置监控目标。</span></div><div class="search">搜索机场 / 城市 / 平台</div><div class="top-actions"><button class="btn">Cancel</button><button class="btn primary">Create Monitor</button></div></header>
+            <main class="main">
+              <div class="stepper"><div class="stepper-item"><span class="stepper-index">1</span><strong>Basic Route</strong></div><div class="stepper-item"><span class="stepper-index">2</span><strong>Dates</strong></div><div class="stepper-item"><span class="stepper-index">3</span><strong>Strategy</strong></div><div class="stepper-item"><span class="stepper-index">4</span><strong>Review</strong></div></div>
+              <div class="split">
+                <div class="card"><div class="card-title">Step 1 · Basic Route</div><div style="height:14px"></div><div class="form-grid">
+                  <div class="field"><label>Monitor Name</label><div class="input">北京 → 东京六月低价监控</div><div class="field-hint">用于列表、报告和通知标题。</div></div>
+                  <div class="field"><label>Platform</label><div class="select">CTRIP</div></div>
+                  <div class="field"><label>From City</label><div class="input">北京</div></div>
+                  <div class="field"><label>From Airports</label><div class="input">PEK, PKX</div></div>
+                  <div class="field"><label>To City</label><div class="input">东京</div></div>
+                  <div class="field"><label>To Airports</label><div class="input">NRT, HND</div></div>
+                </div><div style="height:22px"></div><div class="card-title">Step 2 · Dates</div><div style="height:14px"></div><div class="form-grid"><div class="field"><label>Start Date</label><div class="input">2026-06-01</div></div><div class="field"><label>End Date</label><div class="input">2026-06-12</div></div><div class="field"><label>Weekdays</label><div class="input">Mon, Wed, Fri, Sun</div></div><div class="field"><label>单个日期添加</label><div class="input">2026-06-05</div></div></div><div style="height:12px"></div><div class="alert">Preview generated dates：2026-06-01, 2026-06-03, 2026-06-05, 2026-06-07, 2026-06-10, 2026-06-12</div>
+                <div style="height:22px"></div><div class="card-title">Step 3 · Strategy</div><div style="height:14px"></div><div class="form-grid"><div class="field"><label>Direct</label><div class="select">Enabled</div></div><div class="field"><label>Transfer</label><div class="select">Enabled</div></div><div class="field"><label>Train Positioning</label><div class="select">Enabled</div></div><div class="field"><label>Hidden-city</label><div class="select">Enabled</div></div><div class="field"><label>Max Transfer Count</label><div class="input">1</div></div><div class="field"><label>Max Total Hours</label><div class="input">8.5</div></div><div class="field"><label>Max Price</label><div class="input">¥1800</div></div></div><div style="height:12px"></div><div class="alert">Hidden-city plans may be high risk: no checked baggage, route change risk, airline policy risk.</div></div>
+                <aside class="card"><div class="card-title">Step 4 · Review</div><table style="margin-top:12px"><tr><td>Route</td><td><strong>北京 → 东京</strong></td></tr><tr><td>Dates</td><td>6 enabled</td></tr><tr><td>Platform</td><td>CTRIP</td></tr><tr><td>Strategies</td><td>Direct, Transfer, Train+, Hidden-city</td></tr><tr><td>Risk</td><td><span class="status risk-high">HIGH</span></td></tr></table><div style="height:14px"></div><div class="json-box">{ "manual_takeover": true, "low_frequency": true, "no_captcha_bypass": true }</div><div style="height:14px"></div><button class="btn primary" style="width:100%">Create Monitor</button></aside>
+              </div>
+            </main>
+          </div>
+        </div>
+      </section>
+
+      <div class="screen-title" id="workflows"><div><h2>05 Workflows 列表页</h2><p>像 GitHub Actions / 云任务编排一样展示 Workflow 模板。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item active">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Workflows</strong><span>工作流模板和调度配置。</span></div><div class="search">搜索 Workflow</div><div class="top-actions"><button class="btn primary">Run Default Workflow</button><button class="btn disabled">New Workflow</button></div></header><main class="main"><div class="card"><div class="card-header"><div><div class="card-title">Daily Flight Monitor Workflow</div><div class="muted">Generate tasks, run browser searches, parse prices, analyze plans, create reports.</div></div><span class="status success">Enabled</span></div><div class="steps"><div class="step-node"><div class="step-code">LOAD_MONITORS</div><div class="step-name">读取启用 Monitor</div></div><div class="step-node"><div class="step-code">GENERATE_TASKS</div><div class="step-name">生成查询任务</div></div><div class="step-node"><div class="step-code">RUN_CTRIP_SEARCH</div><div class="step-name">本地浏览器低频查询</div></div><div class="step-node"><div class="step-code">SAVE_SNAPSHOT</div><div class="step-name">保存截图/HTML</div></div><div class="step-node"><div class="step-code">PARSE_PRICE</div><div class="step-name">解析价格</div></div><div class="step-node"><div class="step-code">ANALYZE_BEST_PLAN</div><div class="step-name">分析最优方案</div></div><div class="step-node"><div class="step-code">GENERATE_REPORT</div><div class="step-name">生成报告</div></div><div class="step-node"><div class="step-code">SEND_NOTIFICATION</div><div class="step-name">发送通知</div></div></div><div style="height:16px"></div><table><tr><th>Workflow Name</th><th>Schedule</th><th>Last Run</th><th>Last Status</th><th>Steps Count</th><th>Actions</th></tr><tr><td><strong>Daily Flight Monitor Workflow</strong></td><td class="mono">0 9 * * *</td><td>RUN-20260522-009</td><td><span class="status partial">PARTIAL_SUCCESS</span></td><td>8</td><td><button class="btn">View</button> <button class="btn primary">Run</button> <button class="btn">Schedule</button></td></tr></table></div></main></div></div></section>
+
+      <div class="screen-title" id="workflow-detail"><div><h2>06 Workflow 详情页</h2><p>节点编排、节点状态和配置 JSON 侧栏。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item active">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Daily Flight Monitor Workflow</strong><span>Enabled · 8 steps · cron 0 9 * * *</span></div><div class="search">搜索 step_code</div><div class="top-actions"><span class="status success">Enabled</span><button class="btn">Schedule</button><button class="btn primary">Run Now</button></div></header><main class="main"><div class="split"><div class="card"><div class="card-title">Workflow Step Timeline</div><div style="height:14px"></div><div class="steps" style="flex-direction:column"><div class="step-node"><div class="step-code">LOAD_MONITORS</div><div class="step-name">Load enabled monitors from SQLite.</div><div class="step-meta"><span class="status success">SUCCESS</span><span>avg 0.2s</span></div></div><div class="step-node"><div class="step-code">GENERATE_TASKS</div><div class="step-name">Generate task batch by enabled dates and strategies.</div><div class="step-meta"><span class="status success">SUCCESS</span><span>avg 1.5s</span></div></div><div class="step-node"><div class="step-code">RUN_CTRIP_SEARCH</div><div class="step-name">Run local browser queries sequentially, support manual takeover.</div><div class="step-meta"><span class="status partial">PARTIAL_SUCCESS</span><span>avg 31m</span></div></div><div class="step-node"><div class="step-code">SAVE_SNAPSHOT</div><div class="step-name">Persist screenshot and HTML paths.</div><div class="step-meta"><span class="status success">SUCCESS</span><span>avg 0.8s</span></div></div><div class="step-node"><div class="step-code">PARSE_PRICE</div><div class="step-name">Parse conservative price records from saved HTML.</div><div class="step-meta"><span class="status failed">FAILED</span><span>avg 4.2s</span></div></div></div></div><aside class="card"><div class="card-title">节点详情侧栏</div><table style="margin-top:12px"><tr><td>step_name</td><td>Run CTRIP Search</td></tr><tr><td>step_code</td><td class="mono">RUN_CTRIP_SEARCH</td></tr><tr><td>enabled</td><td><span class="status success">true</span></td></tr><tr><td>last status</td><td><span class="status partial">PARTIAL_SUCCESS</span></td></tr><tr><td>avg duration</td><td>31m 08s</td></tr></table><h4>输入</h4><div class="json-box">{ "batch_no": "FC-20260522-AM", "platform": "CTRIP", "pending_tasks": 48 }</div><h4>输出</h4><div class="json-box">{ "success": 36, "failed": 4, "manual_takeover": 3 }</div><h4>配置 JSON</h4><div class="json-box">{ "sequential": true, "interval_sec": [30, 90], "browser_profile": "data/browser_profile/ctrip" }</div></aside></div></main></div></div></section>
+
+      <div class="screen-title" id="workflow-runs"><div><h2>07 Workflow Runs 页面</h2><p>按 Workflow、Status、Trigger Type 和 Date Range 查看执行历史。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item active">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Workflow Runs</strong><span>执行批次、进度和失败节点追踪。</span></div><div class="search">搜索 Run No / Batch</div><div class="top-actions"><button class="btn primary">Run Workflow</button></div></header><main class="main"><div class="chip-row" style="margin-bottom:16px"><span class="chip">Workflow: Daily Flight Monitor Workflow</span><span class="chip">Status: All</span><span class="chip">Trigger Type: Schedule</span><span class="chip">Date Range: Last 7 days</span></div><div class="table-wrap"><table><tr><th>Run No</th><th>Workflow</th><th>Trigger Type</th><th>Status</th><th>Progress</th><th>Total Steps</th><th>Success / Failed</th><th>Start Time</th><th>Duration</th><th>Actions</th></tr><tr><td class="mono">RUN-20260522-009</td><td>Daily Flight Monitor Workflow</td><td>Schedule</td><td><span class="status running">RUNNING</span></td><td><div class="progress"><span style="width:75%"></span></div><div class="route-sub">6/8 steps</div></td><td>8</td><td>5 / 0</td><td>2026-05-22 09:00</td><td>11m 42s</td><td><button class="btn">Detail</button></td></tr><tr><td class="mono">RUN-20260521-008</td><td>Daily Flight Monitor Workflow</td><td>Manual</td><td><span class="status partial">PARTIAL_SUCCESS</span></td><td><div class="progress orange"><span style="width:100%"></span></div><div class="route-sub">8/8 steps</div></td><td>8</td><td>7 / 1</td><td>2026-05-21 21:30</td><td>38m 10s</td><td><button class="btn">Detail</button></td></tr><tr><td class="mono">RUN-20260520-007</td><td>Daily Flight Monitor Workflow</td><td>Schedule</td><td><span class="status failed">FAILED</span></td><td><div class="progress"><span style="width:62%;background:#d92d20"></span></div><div class="route-sub">5/8 steps</div></td><td>8</td><td>4 / 1</td><td>2026-05-20 09:00</td><td>19m 04s</td><td><button class="btn">Detail</button></td></tr></table></div></main></div></div></section>
+
+      <div class="screen-title" id="run-detail"><div><h2>08 Workflow Run Detail 页面</h2><p>CI/CD 执行详情风格，展示每个节点输入、输出和错误。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item active">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>RUN-20260521-008</strong><span>Batch FC-20260521-PM · Manual</span></div><div class="search">搜索 step / error / task</div><div class="top-actions"><span class="status failed">FAILED</span><button class="btn disabled">Retry Failed Step</button></div></header><main class="main"><div class="alert red"><div><strong>PARSE_PRICE 失败</strong><br>解析器未能从 1 个已保存 HTML 中识别有效价格，截图和 HTML 已保留。</div><button class="btn">View Error</button></div><div class="grid-4"><div class="card"><div class="metric-label">run_no</div><div class="metric-value" style="font-size:18px">RUN-008</div></div><div class="card"><div class="metric-label">start_time</div><div class="metric-value" style="font-size:18px">2026-05-21 21:30</div></div><div class="card"><div class="metric-label">duration</div><div class="metric-value" style="font-size:18px">38m 10s</div></div><div class="card"><div class="metric-label">batch_no</div><div class="metric-value" style="font-size:18px">FC-20260521-PM</div></div></div><div style="height:16px"></div><div class="split"><div class="card"><div class="card-title">Step Run Timeline</div><table style="margin-top:12px"><tr><th>Step name</th><th>Status</th><th>Duration</th><th>Input JSON</th><th>Output JSON</th><th>Error Message</th></tr><tr><td>LOAD_MONITORS</td><td><span class="status success">SUCCESS</span></td><td>0.2s</td><td><button class="btn">View</button></td><td><button class="btn">View</button></td><td>-</td></tr><tr><td>RUN_CTRIP_SEARCH</td><td><span class="status partial">PARTIAL_SUCCESS</span></td><td>31m</td><td><button class="btn">View</button></td><td><button class="btn">View</button></td><td>3 manual takeover</td></tr><tr><td>PARSE_PRICE</td><td><span class="status failed">FAILED</span></td><td>4.8s</td><td><button class="btn">View</button></td><td><button class="btn">View</button></td><td>no price candidates found</td></tr></table></div><aside class="card"><div class="card-title">Context JSON</div><div style="height:12px"></div><div class="json-box">{ "batch_no": "FC-20260521-PM", "generated_task_count": 42, "report_id": "RPT-20260521-02", "manual_takeover_required": true, "browser_profile_ready": true }</div><div style="height:12px"></div><button class="btn" style="width:100%">Open Query Tasks</button></aside></div></main></div></div></section>
+
+      <div class="screen-title" id="tasks"><div><h2>09 Query Tasks 页面</h2><p>展示本地浏览器查询任务、截图/HTML 链接、错误与重置操作。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item active">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Query Tasks</strong><span>浏览器查询任务和可追溯快照。</span></div><div class="search">搜索 Task ID / batch_no / route</div><div class="top-actions"><button class="btn">Reset selected</button><button class="btn primary">Run selected</button></div></header><main class="main"><div class="alert"><div>Browser queries run locally and sequentially. Captcha or login may require manual handling.</div><span class="chip">Manual Takeover Enabled</span></div><div class="chip-row" style="margin-bottom:16px"><span class="chip">batch_no: FC-20260522-AM</span><span class="chip">monitor: All</span><span class="chip">status: All</span><span class="chip">query_type: All</span><span class="chip">platform: CTRIP</span><span class="chip">depart_date: 2026-06-01</span></div><div class="table-wrap"><table><tr><th>Task ID</th><th>Batch</th><th>Route</th><th>Date</th><th>Query Type</th><th>Platform</th><th>Status</th><th>Snapshot</th><th>HTML</th><th>Error</th><th>Created Time</th><th>Actions</th></tr><tr><td class="mono">TASK-1042</td><td>FC-20260522-AM</td><td><div class="route-main">北京 → 东京</div><div class="route-sub">PEK → NRT</div></td><td>2026-06-01</td><td>DIRECT</td><td>CTRIP</td><td><span class="status success">SUCCESS</span></td><td><button class="btn">Screenshot</button></td><td><button class="btn">HTML</button></td><td>-</td><td>09:04</td><td><button class="btn">Run</button> <button class="btn">Parse Price</button></td></tr><tr><td class="mono">TASK-1043</td><td>FC-20260522-AM</td><td><div class="route-main">上海 → 曼谷</div><div class="route-sub">PVG → BKK</div></td><td>2026-07-05</td><td>TRAIN_PLUS_FLIGHT</td><td>CTRIP</td><td><span class="status running">RUNNING</span></td><td>-</td><td>-</td><td>waiting local browser</td><td>09:06</td><td><button class="btn">View Screenshot</button> <button class="btn danger">Reset</button></td></tr><tr><td class="mono">TASK-1044</td><td>FC-20260522-AM</td><td><div class="route-main">广州 → 大阪</div><div class="route-sub">CAN → KIX</div></td><td>2026-06-05</td><td>TRANSFER</td><td>CTRIP</td><td><span class="status failed">FAILED</span></td><td><button class="btn">Screenshot</button></td><td><button class="btn">HTML</button></td><td>captcha required</td><td>09:08</td><td><button class="btn">View Error</button> <button class="btn danger">Reset</button></td></tr></table></div></main></div></div></section>
+
+      <div class="screen-title" id="prices"><div><h2>10 Price Results 页面</h2><p>查看解析出的原始价格数据，价格突出显示，解析不完整用 warning 标记。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item active">Price Results</div><div class="side-item">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Price Results</strong><span>原始价格、航班、行李和来源快照。</span></div><div class="search">搜索 airline / flight no / route</div><div class="top-actions"><button class="btn">Export CSV</button></div></header><main class="main"><div class="chip-row" style="margin-bottom:16px"><span class="chip">batch_no: FC-20260522-AM</span><span class="chip">monitor: All</span><span class="chip">depart_date: All</span><span class="chip">platform: CTRIP</span><span class="chip">price: ¥0-¥2000</span><span class="chip">query_type: All</span></div><div class="table-wrap"><table><tr><th>Route</th><th>Date</th><th>Airline</th><th>Flight No</th><th>Depart</th><th>Arrive</th><th>Duration</th><th>Transfer</th><th>Price</th><th>Baggage</th><th>Source</th><th>Parsed At</th></tr><tr><td><div class="route-main">北京 → 东京</div><div class="route-sub">PEK → NRT</div></td><td>2026-06-01</td><td>Air China</td><td>CA925</td><td>09:25</td><td>13:55</td><td>3h30m</td><td>0</td><td><span class="price">¥1380</span></td><td>1 checked</td><td><button class="btn">Screenshot</button> <button class="btn">HTML</button></td><td>09:34</td></tr><tr><td><div class="route-main">上海 → 曼谷</div><div class="route-sub">PVG → BKK</div></td><td>2026-07-05</td><td>Spring Airlines</td><td>9C7421</td><td>06:40</td><td>10:15</td><td>4h35m</td><td>0</td><td><span class="price">¥920</span></td><td><span class="status partial">missing</span></td><td><button class="btn">Screenshot</button> <button class="btn">HTML</button></td><td>09:42</td></tr></table></div></main></div></div></section>
+
+      <div class="screen-title" id="reports"><div><h2>11 Reports 页面</h2><p>报告列表和 Markdown 风格详情，包含最优、稳妥、激进方案和数据完整性说明。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item active">Reports</div><div class="side-item">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Reports</strong><span>每日分析报告和通知入口。</span></div><div class="search">搜索 Report / Batch / Run</div><div class="top-actions"><button class="btn primary">Send Notification</button></div></header><main class="main"><div class="split"><div class="card"><div class="card-title">报告列表</div><table style="margin-top:12px"><tr><th>Report Title</th><th>Batch No</th><th>Workflow Run</th><th>Created Time</th><th>Status</th><th>Actions</th></tr><tr><td>2026-05-22 低价机会日报</td><td>FC-20260522-AM</td><td>RUN-009</td><td>10:12</td><td><span class="status success">READY</span></td><td><button class="btn">Report</button></td></tr><tr><td>2026-05-21 部分成功日报</td><td>FC-20260521-PM</td><td>RUN-008</td><td>22:18</td><td><span class="status partial">PARTIAL</span></td><td><button class="btn">Report</button></td></tr></table></div><div class="report-body"><h4>今日综合最优</h4><p>北京 → 东京，2026-06-01，CA925，当前最低价 ¥1380，较昨日下降 ¥320，低于预算 ¥420，风险等级 LOW。</p><h4>今日最低价</h4><p>上海 → 曼谷，2026-07-05，Spring Airlines 9C7421，价格 ¥920，低于预算 28%。</p><h4>稳妥方案</h4><ul><li>优先选择直飞和有托运行李的航班。</li><li>北京 → 东京推荐 CA925，价格和耗时均满足预算。</li></ul><h4>激进省钱方案</h4><p>广州 → 大阪存在 Hidden-city 候选，但标记为 HIGH，不作为默认推荐。</p><h4>风险提示</h4><p>3 个任务需要人工接管；1 条价格解析不完整，已保留截图和 HTML。</p><h4>数据完整性说明</h4><p>本报告基于 48 个 Query Task，其中 44 个有截图，48 个有 HTML，36 个价格解析成功。</p><button class="btn primary">Send Notification</button></div></div></main></div></div></section>
+
+      <div class="screen-title" id="settings"><div><h2>12 Settings 页面</h2><p>配置本地浏览器、SQLite、通知、LLM 和安全策略。</p></div></div>
+      <section class="screen"><div class="console"><aside class="side"><div class="side-brand"><span class="side-logo">FC</span>FlightClaw</div><div class="side-group"><div class="side-label">Console</div><div class="side-item">Overview</div><div class="side-item">Monitors</div><div class="side-item">Workflows</div><div class="side-item">Workflow Runs</div><div class="side-item">Query Tasks</div><div class="side-item">Price Results</div><div class="side-item">Reports</div><div class="side-item active">Settings</div></div></aside><div class="content"><header class="topbar"><div class="page-heading"><strong>Settings</strong><span>本地运行参数和安全边界。</span></div><div class="search">搜索设置项</div><div class="top-actions"><button class="btn">Reset</button><button class="btn primary">Save Changes</button></div></header><main class="main"><div class="grid-2"><div class="card"><div class="card-title">Browser Settings</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>Browser Profile Path</label><div class="input">data/browser_profile/ctrip</div></div><div class="field"><label>Headless Mode</label><div class="select">false</div></div><div class="field"><label>Query Interval</label><div class="input">30-90 seconds</div></div><div class="field"><label>Manual Takeover Enabled</label><div class="select">true</div></div></div></div><div class="card"><div class="card-title">Data Storage</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>SQLite Path</label><div class="input">data/flight_claw.db</div></div><div class="field"><label>Screenshots Path</label><div class="input">data/screenshots</div></div><div class="field"><label>HTML Path</label><div class="input">data/html</div></div></div></div><div class="card"><div class="card-title">Notification</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>PushPlus Token</label><div class="input">••••••••••••••••</div></div><div class="field"><label>WeCom Webhook URL</label><div class="input">https://qyapi.weixin.qq.com/••••</div></div></div></div><div class="card"><div class="card-title">LLM Settings</div><div class="form-grid" style="margin-top:12px"><div class="field"><label>Base URL</label><div class="input">https://api.openai.com/v1</div></div><div class="field"><label>Model</label><div class="input">gpt-4.1-mini</div></div><div class="field"><label>API Key</label><div class="input">sk-••••••••••••</div></div></div></div></div><div style="height:16px"></div><div class="card"><div class="card-title">Safety Policy</div><div class="chip-row" style="margin-top:12px"><span class="status success">不绕过验证码</span><span class="status success">不使用代理池</span><span class="status success">不抓取非公开 API</span><span class="status success">个人低频使用</span><span class="status success">不自动下单</span><span class="status success">不识别验证码</span></div></div></main></div></div></section>
+
+      <section class="intro" id="components">
+        <h1>关键复用组件设计</h1>
+        <div class="component-grid" style="margin-top:18px">
+          <div class="card"><div class="card-title">StatusBadge</div><div style="height:12px"></div><div class="chip-row"><span class="status pending"><span class="dot"></span>PENDING</span><span class="status running"><span class="dot"></span>RUNNING</span><span class="status success"><span class="dot"></span>SUCCESS</span><span class="status failed"><span class="dot"></span>FAILED</span><span class="status partial"><span class="dot"></span>PARTIAL_SUCCESS</span></div></div>
+          <div class="card"><div class="card-title">StrategyTags</div><div style="height:12px"></div><div class="chip-row"><span class="chip">Direct</span><span class="chip">Transfer</span><span class="chip">Train+</span><span class="status risk-high">Hidden-city</span></div></div>
+          <div class="card"><div class="card-title">RiskBadge</div><div style="height:12px"></div><div class="chip-row"><span class="status risk-low">LOW</span><span class="status risk-mid">MEDIUM</span><span class="status risk-high">HIGH</span></div></div>
+          <div class="card"><div class="card-title">WorkflowStepNode</div><div style="height:12px"></div><div class="step-node"><div class="step-code">RUN_CTRIP_SEARCH</div><div class="step-name">本地浏览器低频查询</div><div class="step-meta"><span class="status running">RUNNING</span><span class="mono">11m</span></div></div></div>
+          <div class="card"><div class="card-title">RouteCell</div><div style="height:12px"></div><div class="route-main">北京 → 东京</div><div class="route-sub">PEK,PKX → NRT,HND</div></div>
+          <div class="card"><div class="card-title">PriceTrend / SnapshotLinks</div><div style="height:12px"></div><div class="price">¥1380</div><div class="trend-down">↓ 较昨日 ¥320</div><div style="height:12px"></div><button class="btn">Screenshot</button> <button class="btn">HTML</button></div>
+        </div>
+      </section>
+
+      <section class="intro" id="flow">
+        <h1>页面之间的跳转关系与交互说明</h1>
+        <div class="flow" style="margin-top:18px">
+          <div class="flow-row"><strong>Run Workflow</strong><span>点击后创建 Workflow Run 与 Batch，进入 Workflow Run Detail，顶部显示 RUNNING。</span><span>Overview / Workflows → Run Detail</span></div>
+          <div class="flow-row"><strong>Run Task</strong><span>打开本地有头浏览器，串行执行 CTRIP 查询；验证码或登录态异常时进入人工接管状态。</span><span>Query Tasks → Local Browser</span></div>
+          <div class="flow-row"><strong>Screenshot / HTML</strong><span>点击后查看已保存页面快照或 HTML，用于追溯查询结果和调试解析器。</span><span>Query Tasks / Price Results → Snapshot</span></div>
+          <div class="flow-row"><strong>Parse Price</strong><span>只读取已保存 HTML，不重新访问 OTA；解析结果写入 Price Results。</span><span>Query Tasks → Price Results</span></div>
+          <div class="flow-row"><strong>Report</strong><span>从 Workflow Run、Batch、Price Results 进入分析报告，查看今日综合最优、稳妥方案和风险说明。</span><span>Overview / Reports → Report Detail</span></div>
+          <div class="flow-row"><strong>Monitor Dates</strong><span>在 Monitor 列表或详情页进入日期管理，启用、禁用或批量生成查询日期。</span><span>Monitors → Monitor Detail / Dates</span></div>
+        </div>
+      </section>
+
+      <section class="intro" id="spec">
+        <h1>设计规范与前端实现说明</h1>
+        <div class="grid-2" style="margin-top:18px">
+          <div class="card"><div class="card-title">颜色</div><div class="tokens" style="margin-top:12px"><div class="swatch"><div class="swatch-color" style="background:#1769e0"></div><div>Primary #1769E0</div></div><div class="swatch"><div class="swatch-color" style="background:#0f172a"></div><div>Nav #0F172A</div></div><div class="swatch"><div class="swatch-color" style="background:#f5f7fb"></div><div>BG #F5F7FB</div></div><div class="swatch"><div class="swatch-color" style="background:#17a56b"></div><div>SUCCESS</div></div><div class="swatch"><div class="swatch-color" style="background:#d92d20"></div><div>FAILED</div></div><div class="swatch"><div class="swatch-color" style="background:#f79009"></div><div>PARTIAL</div></div></div></div>
+          <div class="card"><div class="card-title">字体、间距和密度</div><ul><li>字体：Inter / Segoe UI / Microsoft YaHei，正文 14px，表格 13px，标题 18-28px。</li><li>页面宽度：1440px desktop first，主内容 padding 24px，卡片间距 16px。</li><li>圆角：卡片和输入 8px，按钮 7px，Tag/Badge 12px。</li><li>表格密度：表头 42px，普通行 56px，高密度但保留可读性。</li><li>边框：#E5EAF2，轻阴影仅用于主卡片，不使用花哨渐变。</li></ul></div>
+          <div class="card"><div class="card-title">按钮层级</div><ul><li>主按钮：Run Workflow、Create Monitor、Run Monitor、Send Notification。</li><li>次按钮：View、Edit、Dates、Schedule、Screenshot、HTML。</li><li>危险按钮：Reset、Delete，用红色文字和浅红边框。</li><li>Disabled：第一版 New Workflow、Retry Failed Step 可以禁用。</li></ul></div>
+          <div class="card"><div class="card-title">实现建议</div><ul><li>优先抽出 StatusBadge、StrategyTags、RiskBadge、WorkflowStepNode、RouteCell、PriceTrend、SnapshotLinks。</li><li>列表页统一使用 Filters + Batch Actions + Dense Table。</li><li>详情页统一使用 Summary Cards + Timeline/List + Context Side Panel。</li><li>Workflow Run Detail 按 CI/CD 日志视角实现，错误 Alert 必须置顶。</li><li>本地浏览器和安全策略在 Header、Task Alert、Settings 中持续可见。</li></ul></div>
+        </div>
+      </section>
+
+      <p class="footer-note">Figma MCP 写入受当前 Starter 额度限制。本 HTML 原型为可直接评审和转前端实现的高保真设计稿。</p>
+    </main>
+  </div>
+</body>
+</html>

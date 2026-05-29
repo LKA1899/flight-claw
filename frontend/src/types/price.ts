@@ -1,0 +1,29 @@
+export interface PriceRaw {
+  id: number;
+  task_id: number;
+  batch_no: string;
+  monitor_id: number;
+  platform: string;
+  query_type: string;
+  depart_date: string;
+  from_city: string;
+  to_city: string;
+  airline?: string | null;
+  flight_no?: string | null;
+  depart_time?: string | null;
+  arrive_time?: string | null;
+  depart_airport?: string | null;
+  arrive_airport?: string | null;
+  duration_minutes?: number | null;
+  transfer_count?: number | null;
+  transfer_city?: string | null;
+  cabin_info?: string | null;
+  baggage_info?: string | null;
+  price: number;
+  currency: string;
+  source_html_path?: string | null;
+  source_screenshot_path?: string | null;
+  parse_status?: string | null;
+  error_message?: string | null;
+  create_time?: string | null;
+}
