@@ -177,7 +177,6 @@ def _roundtrip_strategy_snapshot(monitor: FlightMonitor) -> str:
             "roundtrip_skip_expand_over_budget": bool(monitor.roundtrip_skip_expand_over_budget),
             "continue_on_expand_failed": bool(monitor.continue_on_expand_failed),
             "save_step_snapshot": bool(monitor.save_step_snapshot),
-            "manual_takeover_enabled": bool(monitor.manual_takeover_enabled),
         },
         ensure_ascii=False,
         sort_keys=True,

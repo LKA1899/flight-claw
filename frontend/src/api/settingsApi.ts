@@ -9,7 +9,6 @@ export interface SettingsData {
     scan_interval_max_seconds: number;
     scan_interval_min_allowed: number;
     scan_interval_max_allowed: number;
-    manual_takeover_enabled: boolean;
   };
   storage: Record<string, unknown>;
   notification: Record<string, unknown>;

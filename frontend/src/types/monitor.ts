@@ -26,7 +26,6 @@ export interface Monitor {
   roundtrip_skip_expand_over_budget: boolean;
   continue_on_expand_failed: boolean;
   save_step_snapshot: boolean;
-  manual_takeover_enabled: boolean;
   enabled: boolean;
   schedule_enabled?: boolean;
   schedule_cron?: string | null;

@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -19,36 +18,8 @@ from app.constants import (
 )
 from app.db import SessionLocal
 from app.models import FlightQueryTask, FlightRoundTripOutbound, FlightRoundTripPlan, FlightRoundTripReturn
-from app.parsers.ctrip_parser import html_to_visible_text, parse_ctrip_text
-
-
-def _load_visible_text(task: FlightQueryTask) -> str:
-    if task.text_path:
-        path = Path(task.text_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Text snapshot file not found: {path}")
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if not text.strip():
-            raise ValueError("Text snapshot file is empty")
-        return text
-
-    if not task.html_path:
-        raise ValueError("Text snapshot path is empty")
-    path = Path(task.html_path)
-    if not path.exists():
-        raise FileNotFoundError(f"HTML file not found: {path}")
-    html = path.read_text(encoding="utf-8", errors="replace")
-    if not html.strip():
-        raise ValueError("HTML file is empty")
-    return html_to_visible_text(html)
-
-
-def _load_text_from_path(text_path: str) -> str:
-    path = Path(text_path)
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if path.suffix.lower() in {".html", ".htm"}:
-        return html_to_visible_text(text)
-    return text
+from app.parsers.ctrip_parser import parse_ctrip_text
+from app.services.parser_pipeline import load_text_snapshot, parse_ctrip_task_items
 
 
 def parse_roundtrip_outbounds(task_id: int) -> dict:
@@ -65,8 +36,8 @@ def parse_roundtrip_outbounds_for_task(db: Session, task: FlightQueryTask) -> di
     if not task.return_date:
         raise ValueError("Round-trip task return_date is required")
 
-    visible_text = _load_visible_text(task)
-    items = parse_ctrip_text(visible_text)
+    pipeline_result = parse_ctrip_task_items(db, task)
+    items = pipeline_result.items
     db.execute(delete(FlightRoundTripOutbound).where(FlightRoundTripOutbound.task_id == task.id))
     parsed_count = 0
     for index, item in enumerate(items, start=1):
@@ -167,7 +138,7 @@ def parse_roundtrip_returns_for_outbound(
     screenshot_path: str | None,
     fetch_limit: int,
 ) -> dict:
-    visible_text = _load_text_from_path(text_path)
+    visible_text = load_text_snapshot(text_path)
     items = parse_ctrip_text(visible_text)[:fetch_limit]
     db.execute(delete(FlightRoundTripPlan).where(FlightRoundTripPlan.outbound_id == outbound.id))
     db.execute(delete(FlightRoundTripReturn).where(FlightRoundTripReturn.outbound_id == outbound.id))
