@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.db import SessionLocal, create_all
 from app.models import FlightUser
 from app.routers import api, auth
+from app.services.scan_service import recover_interrupted_scans
 from app.services.scheduler_service import shutdown_scheduler, start_scheduler
 
 
@@ -67,8 +68,13 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def on_startup() -> None:
         create_all()
+        with SessionLocal() as db:
+            recover_interrupted_scans(db)
         _init_default_admin()
         start_scheduler()
+        from app.services.scan_runner import dispatch_queued_scans
+
+        dispatch_queued_scans()
 
     @app.on_event("shutdown")
     def on_shutdown() -> None:

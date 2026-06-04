@@ -1,10 +1,10 @@
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import QUERY_DIRECT, QUERY_HIDDEN_CITY, RISK_HIGH, RISK_LOW, RISK_MEDIUM
+from app.constants import QUERY_DIRECT, QUERY_HIDDEN_CITY, RISK_HIGH, RISK_LOW, RISK_MEDIUM, TRIP_ROUND_TRIP
 from app.db import SessionLocal
 from app.models import FlightBestDaily, FlightPlanResult
 
@@ -52,10 +52,16 @@ def _summary(best: FlightPlanResult, cheapest: FlightPlanResult, safest: FlightP
 
 def analyze_best_daily(batch_no: str) -> dict:
     with SessionLocal() as db:
+        db.execute(delete(FlightBestDaily).where(FlightBestDaily.batch_no == batch_no))
+        db.commit()
         plans = list(
             db.scalars(
                 select(FlightPlanResult)
-                .where(FlightPlanResult.batch_no == batch_no)
+                .where(
+                    FlightPlanResult.batch_no == batch_no,
+                    FlightPlanResult.plan_type != "ROUNDTRIP_CLUE",
+                    FlightPlanResult.trip_type != TRIP_ROUND_TRIP,
+                )
                 .order_by(FlightPlanResult.monitor_id, FlightPlanResult.depart_date, FlightPlanResult.score.desc())
             )
         )
@@ -72,14 +78,7 @@ def analyze_best_daily(batch_no: str) -> dict:
             best_candidates = [item for item in group if item.plan_type != QUERY_HIDDEN_CITY]
             best = max(best_candidates or group, key=lambda item: item.score)
             prev_price = _previous_best_price(db, best)
-            existing = db.scalar(
-                select(FlightBestDaily).where(
-                    FlightBestDaily.batch_no == batch_no,
-                    FlightBestDaily.monitor_id == best.monitor_id,
-                    FlightBestDaily.depart_date == best.depart_date,
-                )
-            )
-            row = existing or FlightBestDaily(
+            row = FlightBestDaily(
                 batch_no=batch_no,
                 monitor_id=best.monitor_id,
                 depart_date=best.depart_date,
@@ -92,8 +91,7 @@ def analyze_best_daily(batch_no: str) -> dict:
             row.prev_best_price = prev_price
             row.price_trend = _trend(best.total_price, prev_price)
             row.summary = _summary(best, cheapest, safest, aggressive)
-            if not existing:
-                db.add(row)
+            db.add(row)
             try:
                 db.commit()
                 saved_count += 1

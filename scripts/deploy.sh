@@ -8,7 +8,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 APP_PORT="${APP_PORT:-8081}"
-NO_CACHE="${NO_CACHE:-1}"
+NO_CACHE="${NO_CACHE:-0}"
 
 echo "================================================"
 echo " flight-scan deploy"
@@ -33,7 +33,7 @@ fi
 echo "[1/3] Stop old containers..."
 docker compose down --remove-orphans
 
-echo "[2/3] Build images without pulling remote base images..."
+echo "[2/3] Build images from local cache..."
 if [ "$NO_CACHE" = "1" ]; then
     APP_PORT="$APP_PORT" docker compose build --no-cache
 else

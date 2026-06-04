@@ -32,6 +32,14 @@ export function MonitorListPage() {
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "启动扫描失败"),
   });
+  const cancelScan = useMutation({
+    mutationFn: monitorApi.cancelRunningScan,
+    onSuccess: () => {
+      toast.success("已请求停止扫描");
+      queryClient.invalidateQueries({ queryKey: ["monitors"] });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "停止扫描失败"),
+  });
 
   return (
     <>
@@ -60,6 +68,7 @@ export function MonitorListPage() {
                     onDelete={open}
                     onToggle={() => toggle.mutate(monitor.id)}
                     onScan={() => scanNow.mutate(monitor.id)}
+                    onCancelScan={() => cancelScan.mutate(monitor.id)}
                     scanning={scanNow.isPending}
                   />
                 )}

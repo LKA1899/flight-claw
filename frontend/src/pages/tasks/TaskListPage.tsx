@@ -28,6 +28,7 @@ export function TaskListPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const run = useMutation({ mutationFn: taskApi.run, onSuccess: () => { toast.success("任务已执行"); invalidate(); }, onError: (error) => toast.error(error instanceof Error ? error.message : "执行失败") });
   const reset = useMutation({ mutationFn: taskApi.reset, onSuccess: () => { toast.success("任务已重置"); invalidate(); } });
+  const cancel = useMutation({ mutationFn: taskApi.cancel, onSuccess: () => { toast.success("已请求取消任务"); invalidate(); }, onError: (error) => toast.error(error instanceof Error ? error.message : "取消失败") });
   const parse = useMutation({ mutationFn: taskApi.parsePrice, onSuccess: () => toast.success("解析完成"), onError: (error) => toast.error(error instanceof Error ? error.message : "解析失败") });
 
   return (
@@ -83,7 +84,7 @@ export function TaskListPage() {
                   <TableCell>{task.data_completeness || "-"}{task.roundtrip_stage ? <div className="text-xs text-stone-500">{task.roundtrip_stage}</div> : null}</TableCell>
                   <TableCell><StatusBadge status={task.status} /></TableCell>
                   <TableCell><SnapshotLinks taskId={task.id} screenshot={task.screenshot_path} /></TableCell>
-                  <TableCell className="max-w-48 truncate text-red-600">{task.error_message || task.parse_error_message || "-"}</TableCell>
+                  <TableCell className="max-w-md whitespace-pre-wrap break-words text-red-600">{task.error_message || task.parse_error_message || "-"}</TableCell>
                   <TableCell>{formatDateTime(task.create_time)}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
@@ -93,7 +94,7 @@ export function TaskListPage() {
                           <Button asChild size="sm" variant="secondary"><Link to={`/round-trips?task_id=${task.id}&tab=plans`}>完整组合</Link></Button>
                         </>
                       ) : null}
-                      <TaskActionMenu task={task} onRun={() => run.mutate(task.id)} onParse={() => parse.mutate(task.id)} onReset={() => reset.mutate(task.id)} />
+                      <TaskActionMenu task={task} onRun={() => run.mutate(task.id)} onParse={() => parse.mutate(task.id)} onReset={() => reset.mutate(task.id)} onCancel={() => cancel.mutate(task.id)} />
                     </div>
                   </TableCell>
                 </TableRow>

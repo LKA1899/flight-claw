@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { scanApi } from "@/api/scanApi";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
@@ -17,10 +17,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { STATUS_OPTIONS } from "@/lib/constants";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { usePagedParams } from "@/lib/queryParams";
+import { toast } from "sonner";
 
 export function ScanListPage() {
   const qp = usePagedParams(20);
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["scans", qp.params], queryFn: () => scanApi.list(qp.params) });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["scans"] });
+  const cancelScan = useMutation({
+    mutationFn: scanApi.cancel,
+    onSuccess: () => {
+      toast.success("已请求停止扫描");
+      invalidate();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "停止失败"),
+  });
+  const restartScan = useMutation({
+    mutationFn: scanApi.restart,
+    onSuccess: () => {
+      toast.success("扫描已重新加入队列");
+      invalidate();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "重新开始失败"),
+  });
 
   return (
     <>
@@ -81,6 +100,12 @@ export function ScanListPage() {
                       <Button asChild size="sm" variant="secondary"><Link to={`/scans/${scan.id}`}>详情</Link></Button>
                       <Button asChild size="sm" variant="secondary"><Link to={`/tasks?scan_id=${scan.id}`}>任务</Link></Button>
                       {scan.report_id ? <Button asChild size="sm" variant="secondary"><Link to={`/reports/${scan.report_id}`}>报告</Link></Button> : null}
+                      {["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(scan.status) ? (
+                        <Button size="sm" variant="outline" onClick={() => cancelScan.mutate(scan.id)} disabled={cancelScan.isPending}>停止</Button>
+                      ) : null}
+                      {["FAILED", "CANCELLED", "PARTIAL_SUCCESS"].includes(scan.status) ? (
+                        <Button size="sm" variant="outline" onClick={() => restartScan.mutate(scan.id)} disabled={restartScan.isPending}>重新开始</Button>
+                      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>

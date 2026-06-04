@@ -28,10 +28,19 @@ export function MonitorDetailPage() {
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "启动扫描失败"),
   });
+  const cancelScan = useMutation({
+    mutationFn: () => monitorApi.cancelRunningScan(id),
+    onSuccess: () => {
+      toast.success("已请求停止扫描");
+      queryClient.invalidateQueries({ queryKey: ["monitor", id] });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "停止扫描失败"),
+  });
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError) return <ErrorState error={query.error} />;
   const monitor = query.data!;
+  const hasActiveScan = ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(String(monitor.last_scan_status || ""));
 
   return (
     <>
@@ -40,7 +49,11 @@ export function MonitorDetailPage() {
         description="关注路线详情、扫描策略、日期配置和定时扫描入口。"
         actions={
           <>
-            <Button onClick={() => scanNow.mutate()} disabled={scanNow.isPending || !monitor.enabled}><Play className="h-4 w-4" />{scanNow.isPending ? "启动中" : "立即扫描"}</Button>
+            {hasActiveScan ? (
+              <Button variant="outline" onClick={() => cancelScan.mutate()} disabled={cancelScan.isPending}>停止扫描</Button>
+            ) : (
+              <Button onClick={() => scanNow.mutate()} disabled={scanNow.isPending || !monitor.enabled}><Play className="h-4 w-4" />{scanNow.isPending ? "启动中" : "立即扫描"}</Button>
+            )}
             <Button asChild variant="secondary"><Link to={`/monitors/${id}/schedule`}><Clock className="h-4 w-4" />定时扫描</Link></Button>
             <Button asChild variant="secondary"><Link to={`/monitors/${id}/edit#dates`}><CalendarDays className="h-4 w-4" />日期管理</Link></Button>
             {monitor.allow_train_positioning ? <Button asChild variant="secondary"><Link to={`/monitors/${id}/positionings`}><MapPin className="h-4 w-4" />接驳城市</Link></Button> : null}

@@ -1,28 +1,42 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { settingsApi, type SettingsData } from "@/api/settingsApi";
+import { settingsApi } from "@/api/settingsApi";
 import { PageHeader } from "@/components/common/PageHeader";
 import { LoadingState } from "@/components/common/LoadingState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["settings"], queryFn: settingsApi.get });
+  const [scanIntervalMin, setScanIntervalMin] = useState(30);
+  const [scanIntervalMax, setScanIntervalMax] = useState(90);
   const updateMutation = useMutation({
-    mutationFn: (payload: { headless: boolean }) => settingsApi.update(payload),
+    mutationFn: settingsApi.update,
     onSuccess: () => {
       toast.success("设置已保存");
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const browser = query.data?.browser;
+
+  useEffect(() => {
+    if (!browser) {
+      return;
+    }
+    setScanIntervalMin(browser.scan_interval_min_seconds);
+    setScanIntervalMax(browser.scan_interval_max_seconds);
+  }, [browser]);
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError) return <ErrorState error={query.error} />;
   const data = query.data!;
+  const browserSettings = data.browser;
 
   return (
     <>
@@ -34,20 +48,64 @@ export function SettingsPage() {
             <div className="flex items-center justify-between rounded-xl bg-[#fbf8f4] p-3">
               <div>
                 <div className="font-medium text-ink">无头模式</div>
-                <div className="text-xs text-stone-500">{data.browser.headless ? "后台静默运行" : "显示浏览器窗口"}</div>
+                <div className="text-xs text-stone-500">{browserSettings.headless ? "后台静默运行" : "显示浏览器窗口"}</div>
               </div>
               <Switch
-                checked={Boolean(data.browser.headless)}
-                onCheckedChange={(checked) => updateMutation.mutate({ headless: checked })}
+                checked={Boolean(browserSettings.headless)}
+                onCheckedChange={(checked) =>
+                  updateMutation.mutate({
+                    headless: checked,
+                    scan_interval_min_seconds: scanIntervalMin,
+                    scan_interval_max_seconds: scanIntervalMax,
+                  })
+                }
               />
             </div>
             <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
               <span className="text-stone-500">Profile</span>
-              <span className="ml-3 font-medium text-ink">{String(data.browser.profile_path)}</span>
+              <span className="ml-3 font-medium text-ink">{String(browserSettings.profile_path)}</span>
             </div>
-            <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
-              <span className="text-stone-500">Query Interval</span>
-              <span className="ml-3 font-medium text-ink">{String(data.browser.query_interval)}</span>
+            <div className="rounded-xl bg-[#fbf8f4] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium text-ink">扫描间隔</div>
+                  <div className="text-xs text-stone-500">
+                    批次任务之间的等待时间，单位秒，范围 {browserSettings.scan_interval_min_allowed}-{browserSettings.scan_interval_max_allowed}
+                  </div>
+                </div>
+                <div className="text-sm font-medium text-ink">{String(browserSettings.query_interval)}</div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                <Input
+                  type="number"
+                  min={browserSettings.scan_interval_min_allowed}
+                  max={browserSettings.scan_interval_max_allowed}
+                  value={scanIntervalMin}
+                  onChange={(event) => setScanIntervalMin(Number(event.target.value))}
+                  placeholder="最小秒数"
+                />
+                <Input
+                  type="number"
+                  min={browserSettings.scan_interval_min_allowed}
+                  max={browserSettings.scan_interval_max_allowed}
+                  value={scanIntervalMax}
+                  onChange={(event) => setScanIntervalMax(Number(event.target.value))}
+                  placeholder="最大秒数"
+                />
+                <Button
+                  type="button"
+                  disabled={updateMutation.isPending}
+                  onClick={() =>
+                    updateMutation.mutate({
+                      headless: browserSettings.headless,
+                      scan_interval_min_seconds: scanIntervalMin,
+                      scan_interval_max_seconds: scanIntervalMax,
+                    })
+                  }
+                >
+                  保存
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

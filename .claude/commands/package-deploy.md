@@ -1,59 +1,44 @@
 # package-deploy
 
-为 flight-scan 生成云服务器部署/更新包。这个命令用于把当前项目代码打成可上传服务器的 `.tar.gz`，并给出服务器上一条命令完成更新部署的指令。
+为 flight-scan 生成云服务器部署/更新包，并给出服务器上一条命令完成更新部署的指令。
 
-## 核心原则
+## 核心规则
 
-1. 不要每次拉取远程基础镜像。
-   - `scripts/deploy.sh` 必须使用 `docker compose build`。
-   - 不要使用 `docker compose build --pull`。
-   - 默认允许 `--no-cache` 重建应用层，避免旧代码缓存。
+1. Docker 构建策略
+   - `scripts/deploy.sh` 不要使用 `docker compose build --pull`。
+   - 默认使用 `NO_CACHE=0`，即 `docker compose build`，优先复用服务器本地缓存和已有镜像。
+   - 如果服务器缺少基础镜像，允许 Docker 在 build 时正常拉取，不要做离线镜像检查，也不要因为缺少本地基础镜像提前报错。
+   - 只有用户明确要求彻底重建时，才使用 `NO_CACHE=1`。
 
-2. 更新部署默认不覆盖服务器数据库。
-   - 常规更新包不要包含 `data/flight_claw.db`。
-   - 常规更新包不要包含 `data/settings.json`，除非用户明确要求同步本地设置。
-   - 数据库结构变更应通过 `app/db.py::ensure_runtime_schema()` 自动迁移。
-   - 如果必须迁移数据，新增明确的迁移逻辑或脚本，不能直接用本地数据库覆盖生产库。
+2. 常规更新包不覆盖服务器数据
+   - 不包含 `.env.production`。
+   - 不包含 `data/flight_claw.db`。
+   - 不包含 `data/settings.json`，除非用户明确要求同步本地设置。
+   - 不包含运行产物：`data/screenshots`、`data/text`、`data/html`、`data/browser_profile`、`data/debug`。
+   - 数据库结构变更必须通过 `app/db.py::ensure_runtime_schema()` 或明确迁移逻辑完成，不要用本地数据库覆盖生产数据库。
 
-3. 首次部署或用户明确要求“带数据库”时才打包 SQLite。
-   - 使用 SQLite backup API 生成一致性副本，不能直接压缩正在使用的 `data/flight_claw.db`。
-   - 明确告诉用户：带数据库的包会覆盖/初始化服务器数据目录中的数据库。
+3. 首次部署或用户明确要求“带数据库”时才打包 SQLite
+   - 使用 SQLite backup API 生成一致性副本。
+   - 明确提示：带数据库包会初始化或覆盖服务器数据目录中的数据库，不适合作为日常更新包。
 
-4. 部署目录固定。
-   - 服务器固定使用 `/opt/flight-scan/current`。
-   - 不要让用户在多个带时间戳目录里反复部署，避免部署错旧目录。
+4. 固定部署目录
+   - 服务器统一部署到 `/opt/flight-scan/current`。
+   - 使用 `/opt/flight-scan/current.prev` 作为上一次版本备份。
+   - 不要让用户在多个时间戳目录中反复部署，避免运行旧代码。
 
-5. 默认端口避开 80。
+5. 默认端口
    - `docker-compose.yml` 使用 `${APP_PORT:-8081}:80`。
    - 部署命令默认 `APP_PORT=8081`。
-   - 如果用户要换端口，允许 `APP_PORT=8090` 之类覆盖。
 
-6. Playwright 不下载自带 Chromium。
+6. Playwright/Chromium
    - Dockerfile 使用 `python:3.11-slim-bookworm`。
    - apt 安装系统 `chromium`。
    - 设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`。
-   - 不要执行 `playwright install chromium --with-deps`，国内镜像可能缺 `chromium-headless-shell`。
+   - 不执行 `playwright install chromium --with-deps`。
 
 ## 打包前检查
 
-先检查以下文件是否满足部署约束：
-
-```bash
-grep -n -- '--pull' scripts/deploy.sh || true
-grep -n 'APP_PORT' docker-compose.yml scripts/deploy.sh
-grep -n 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH\|playwright install' Dockerfile app/crawler/ctrip.py
-```
-
-要求：
-
-- `scripts/deploy.sh` 不能出现 `--pull`。
-- `docker-compose.yml` 端口应为 `${APP_PORT:-8081}:80`。
-- `Dockerfile` 不能再有 `RUN playwright install chromium --with-deps`。
-- `app/crawler/ctrip.py` 需要把环境变量传给 `launch_persistent_context(executable_path=...)`。
-
-## 验证命令
-
-每次打包前必须执行：
+执行：
 
 ```bash
 python -m compileall app
@@ -64,99 +49,118 @@ bash -n scripts/backup.sh
 bash -n scripts/restore.sh
 ```
 
-如果任一命令失败，停止打包并先修复。
+如果任一命令失败，先修复，不要打包。
 
-## 常规更新包，不带数据库
+同时检查：
 
-默认使用这个模式。适用于修 bug、改前端、改后端、改数据库模型但由 `ensure_runtime_schema()` 自动迁移的情况。
-
-PowerShell 打包参考：
-
-```powershell
-$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$outDir = Join-Path (Get-Location) 'dist-deploy'
-$stage = Join-Path $outDir "flight-scan-update-$stamp"
-$pkg = Join-Path $outDir "flight-scan-update-$stamp.tar.gz"
-
-if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-New-Item -ItemType Directory -Force -Path $stage | Out-Null
-
-Copy-Item app,nginx,scripts -Destination $stage -Recurse -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $stage 'frontend') | Out-Null
-robocopy frontend (Join-Path $stage 'frontend') /E /XD node_modules dist /XF tsconfig.tsbuildinfo | Out-Null
-
-Copy-Item Dockerfile,Dockerfile.frontend,docker-compose.yml,entrypoint.sh,requirements.txt,run.py,README.md,DEPLOY_SERVER.md,.dockerignore,.env.production.example -Destination $stage -Force
-
-tar -czf $pkg -C $outDir "flight-scan-update-$stamp"
-Remove-Item -Recurse -Force $stage
-Get-Item $pkg | Select-Object FullName,Length,LastWriteTime
-Get-FileHash $pkg -Algorithm SHA256 | Format-List
+```bash
+grep -n -- '--pull' scripts/deploy.sh || true
+grep -n 'NO_CACHE' scripts/deploy.sh
+grep -n 'APP_PORT' docker-compose.yml scripts/deploy.sh
+grep -n 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH\|playwright install' Dockerfile app/crawler/ctrip.py
 ```
 
-注意：常规更新包不包含 `.env.production`，避免覆盖服务器生产密钥。
+要求：
+- `scripts/deploy.sh` 不出现 `--pull`。
+- `NO_CACHE` 默认是 `0`。
+- 不要存在本地基础镜像缺失就报错的离线检查。
+- Dockerfile 不执行 `playwright install chromium --with-deps`。
 
-## 首次部署包或显式带数据库包
+## 常规更新包
 
-只有用户明确要求“带数据库一起部署/初始化”时使用。
+默认使用此模式。
 
-先用 SQLite backup API 备份数据库：
+包名：
 
-```powershell
-@'
-import sqlite3
-from pathlib import Path
-src = Path('data/flight_claw.db')
-dst_dir = Path('dist-deploy/db-backup')
-dst_dir.mkdir(parents=True, exist_ok=True)
-dst = dst_dir / 'flight_claw.db'
-source = sqlite3.connect(src)
-target = sqlite3.connect(dst)
-source.backup(target)
-target.close()
-source.close()
-print(dst.resolve())
-print(dst.stat().st_size)
-'@ | python -
+```text
+flight-scan-update-YYYYMMDD_HHMMSS.tar.gz
 ```
 
-然后在 staging 目录中加入：
+包含：
+- `app`
+- `frontend` 源码
+- `nginx`
+- `scripts`
+- `docs`
+- `.claude`
+- `Dockerfile`
+- `Dockerfile.frontend`
+- `docker-compose.yml`
+- `entrypoint.sh`
+- `requirements.txt`
+- `run.py`
+- `README.md`
+- `DEPLOY_SERVER.md`
+- `.dockerignore`
+- `.env.production.example`
 
+排除：
+- `.env.production`
 - `data/flight_claw.db`
 - `data/settings.json`
-- `.env.production`，仅在用户明确要求连生产配置一起带上时加入
+- `data/screenshots`
+- `data/text`
+- `data/html`
+- `data/browser_profile`
+- `data/debug`
+- `frontend/node_modules`
+- `frontend/dist`
+- `frontend/dist-deploy`
+- `frontend/tsconfig.tsbuildinfo`
 
-必须在最终回复中提醒：带数据库包会覆盖/初始化服务器数据库，不适合作为常规更新包。
+## 服务器一条命令模板
 
-## 服务器一条命令部署
-
-常规更新包部署命令模板：
+将 `PACKAGE_NAME.tar.gz` 替换成实际上传到服务器的包路径，例如 `/opt/flight-scan-update-xxx.tar.gz`。
 
 ```bash
-rm -rf /opt/flight-scan/current.new \
-&& mkdir -p /opt/flight-scan/current.new \
-&& tar -xzf /root/PACKAGE_NAME.tar.gz -C /opt/flight-scan/current.new --strip-components=1 \
-&& cp -n /opt/flight-scan/current/.env.production /opt/flight-scan/current.new/.env.production 2>/dev/null || true \
-&& cp -rn /opt/flight-scan/current/data /opt/flight-scan/current.new/data 2>/dev/null || true \
-&& rm -rf /opt/flight-scan/current.prev \
-&& mv /opt/flight-scan/current /opt/flight-scan/current.prev 2>/dev/null || true \
-&& mv /opt/flight-scan/current.new /opt/flight-scan/current \
-&& cd /opt/flight-scan/current \
-&& APP_PORT=8081 NO_CACHE=1 bash scripts/deploy.sh
+set -e
+PKG=/opt/PACKAGE_NAME.tar.gz
+APP=/opt/flight-scan/current
+
+test -f "$PKG"
+rm -rf "$APP.new"
+mkdir -p "$APP.new"
+tar -xzf "$PKG" -C "$APP.new" --strip-components=1
+test -f "$APP.new/scripts/deploy.sh"
+
+if [ -f "$APP/.env.production" ]; then
+  cp "$APP/.env.production" "$APP.new/.env.production"
+elif [ -f "$APP.prev/.env.production" ]; then
+  cp "$APP.prev/.env.production" "$APP.new/.env.production"
+fi
+
+if [ -d "$APP/data" ]; then
+  rm -rf "$APP.new/data"
+  cp -a "$APP/data" "$APP.new/data"
+elif [ -d "$APP.prev/data" ]; then
+  rm -rf "$APP.new/data"
+  cp -a "$APP.prev/data" "$APP.new/data"
+fi
+
+rm -rf "$APP.prev"
+if [ -d "$APP" ]; then mv "$APP" "$APP.prev"; fi
+mv "$APP.new" "$APP"
+cd "$APP"
+APP_PORT=8081 NO_CACHE=0 bash scripts/deploy.sh
 ```
 
-如果这是首次部署且包内已经包含 `.env.production` 和 `data/flight_claw.db`，可以简化为：
+## 容器名冲突处理
+
+如果出现：
+
+```text
+container name "/flightclaw-backend" is already in use
+```
+
+让用户执行：
 
 ```bash
-rm -rf /opt/flight-scan/current \
-&& mkdir -p /opt/flight-scan/current \
-&& tar -xzf /root/PACKAGE_NAME.tar.gz -C /opt/flight-scan/current --strip-components=1 \
-&& cd /opt/flight-scan/current \
-&& APP_PORT=8081 NO_CACHE=1 bash scripts/deploy.sh
+cd /opt/flight-scan/current
+docker rm -f flightclaw-backend flightclaw-nginx 2>/dev/null || true
+APP_PORT=8081 NO_CACHE=0 bash scripts/deploy.sh
 ```
 
 ## 部署后验证
-
-给用户这些命令：
 
 ```bash
 cd /opt/flight-scan/current
@@ -166,16 +170,7 @@ docker compose logs --tail=80 backend
 docker compose logs --tail=80 nginx
 ```
 
-如果用户怀疑仍是旧代码，让用户查容器内源码或前端产物：
-
-```bash
-docker exec -it flightclaw-backend sh -lc 'grep -R "关键字" -n /app/app | head'
-docker exec -it flightclaw-nginx sh -lc 'grep -R "关键字" -n /usr/share/nginx/html | head'
-```
-
-## 最终回复格式
-
-打包完成后输出：
+## 最终回复必须包含
 
 1. 包路径
 2. SHA256
@@ -184,4 +179,3 @@ docker exec -it flightclaw-nginx sh -lc 'grep -R "关键字" -n /usr/share/nginx
 5. 服务器一条命令部署指令
 6. 访问地址，例如 `http://服务器IP:8081`
 7. 需要放行的安全组端口
-

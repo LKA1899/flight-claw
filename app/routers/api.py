@@ -46,10 +46,10 @@ from app.models import (
 )
 from app.services import date_service, monitor_service, positioning_service, transfer_service
 from app.services.price_parse_service import parse_task_price
-from app.services.scan_runner import scan_monitor
+from app.services.scan_runner import cancel_running_monitor_scan, cancel_scan, restart_scan, scan_monitor
 from app.services.scan_service import scan_dict, step_log_dict
 from app.services.scheduler_service import refresh_scheduler
-from app.services.task_service import reset_task
+from app.services.task_service import cancel_task, reset_task
 from app.services.city_code_service import seed_default_city_codes, sync_ourairports_city_codes
 from app.crawler.ctrip import run_ctrip_task
 from app.security.auth import get_current_user
@@ -371,6 +371,7 @@ def batch_dict(item: FlightQueryBatch) -> dict[str, Any]:
 def task_dict(item: FlightQueryTask) -> dict[str, Any]:
     return {
         "id": item.id,
+        "scan_id": item.scan_id,
         "batch_no": item.batch_no,
         "monitor_id": item.monitor_id,
         "monitor_name": item.monitor.monitor_name if item.monitor else None,
@@ -766,7 +767,15 @@ def toggle_monitor(monitor_id: int, db: Session = Depends(get_db)):
 @router.post("/monitors/{monitor_id}/scan-now")
 def scan_monitor_now(monitor_id: int, db: Session = Depends(get_db)):
     scan = scan_monitor(db, monitor_id, TRIGGER_MANUAL)
-    return ok({"scan_id": scan.id, "scan_no": scan.scan_no})
+    return ok({"scan_id": scan.id, "scan_no": scan.scan_no, "status": scan.status})
+
+
+@router.post("/monitors/{monitor_id}/cancel-running-scan")
+def cancel_monitor_running_scan(monitor_id: int, db: Session = Depends(get_db)):
+    scan = cancel_running_monitor_scan(db, monitor_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="No active scan for this monitor")
+    return ok(scan_dict(scan))
 
 
 @router.get("/monitors/{monitor_id}/schedule")
@@ -974,6 +983,22 @@ def scan_detail(scan_id: int, db: Session = Depends(get_db)):
     return ok(scan_dict(item))
 
 
+@router.post("/scans/{scan_id}/cancel")
+def cancel_scan_api(scan_id: int, db: Session = Depends(get_db)):
+    try:
+        return ok(scan_dict(cancel_scan(db, scan_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/scans/{scan_id}/restart")
+def restart_scan_api(scan_id: int, db: Session = Depends(get_db)):
+    try:
+        return ok(scan_dict(restart_scan(db, scan_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/scans/{scan_id}/steps")
 def scan_steps(scan_id: int, db: Session = Depends(get_db)):
     if not db.get(FlightScan, scan_id):
@@ -1050,6 +1075,11 @@ def run_task_api(task_id: int):
 @router.post("/tasks/{task_id}/reset")
 def reset_task_api(task_id: int, db: Session = Depends(get_db)):
     return ok(task_dict(reset_task(db, task_id)))
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task_api(task_id: int, db: Session = Depends(get_db)):
+    return ok(task_dict(cancel_task(db, task_id)))
 
 
 @router.post("/tasks/{task_id}/parse-price")
@@ -1448,9 +1478,15 @@ def delete_city_code(city_code_id: int, db: Session = Depends(get_db)):
 
 @router.get("/settings")
 def get_settings():
-    from app.services.settings_service import load_settings
+    from app.services.settings_service import (
+        SCAN_INTERVAL_MAX_ALLOWED,
+        SCAN_INTERVAL_MIN_ALLOWED,
+        get_scan_interval_range,
+        load_settings,
+    )
 
     s = load_settings()
+    interval_min_seconds, interval_max_seconds = get_scan_interval_range()
     pushplus = (os.getenv("PUSHPLUS_TOKEN") or "").strip()
     wework = (os.getenv("WEWORK_WEBHOOK_URL") or "").strip()
     llm_key = (os.getenv("OPENAI_API_KEY") or "").strip()
@@ -1459,7 +1495,11 @@ def get_settings():
             "browser": {
                 "profile_path": str(DATA_DIR / "browser_profile" / "ctrip"),
                 "headless": s.get("headless", False),
-                "query_interval": "30-90 seconds",
+                "query_interval": f"{interval_min_seconds}-{interval_max_seconds} seconds",
+                "scan_interval_min_seconds": interval_min_seconds,
+                "scan_interval_max_seconds": interval_max_seconds,
+                "scan_interval_min_allowed": SCAN_INTERVAL_MIN_ALLOWED,
+                "scan_interval_max_allowed": SCAN_INTERVAL_MAX_ALLOWED,
                 "manual_takeover_enabled": True,
             },
             "storage": {
@@ -1489,11 +1529,22 @@ def get_settings():
 
 class SettingsPayload(BaseModel):
     headless: bool = False
+    scan_interval_min_seconds: int = 30
+    scan_interval_max_seconds: int = 90
 
 
 @router.put("/settings")
 def update_settings(payload: SettingsPayload):
     from app.services.settings_service import save_settings
 
-    save_settings({"headless": payload.headless})
-    return ok({"headless": payload.headless})
+    try:
+        saved = save_settings(
+            {
+                "headless": payload.headless,
+                "scan_interval_min_seconds": payload.scan_interval_min_seconds,
+                "scan_interval_max_seconds": payload.scan_interval_max_seconds,
+            }
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ok(saved)

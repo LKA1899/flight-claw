@@ -29,6 +29,7 @@ frontend/.vite/
 frontend/tsconfig.tsbuildinfo
 
 .codex-run-logs/
+.tmp-gh/
 .claude/settings.local.json
 *.log
 captcha_test.png

@@ -1,4 +1,4 @@
-export type Status = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL_SUCCESS" | "SKIPPED" | "ENABLED" | "DISABLED";
+export type Status = "PENDING" | "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL_SUCCESS" | "SKIPPED" | "CANCEL_REQUESTED" | "CANCELLED" | "ENABLED" | "DISABLED";
 
 export interface ApiResponse<T> {
   success: boolean;

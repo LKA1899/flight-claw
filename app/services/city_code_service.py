@@ -28,6 +28,8 @@ DEFAULT_CTRIP_CITY_CODES: list[dict[str, str]] = [
     {"city_name": "Kunming", "city_code": "kmg", "aliases": "昆明,昆明市,KMG", "country": "CN"},
     {"city_name": "喀什", "city_code": "khg", "aliases": "喀什市,KHG", "country": "中国"},
     {"city_name": "Kashgar", "city_code": "khg", "aliases": "喀什,喀什市,KHG", "country": "CN"},
+    {"city_name": "拉萨", "city_code": "lxa", "aliases": "拉萨市,LXA,ZULS,贡嘎机场,拉萨贡嘎", "country": "中国"},
+    {"city_name": "Lhasa", "city_code": "lxa", "aliases": "拉萨,拉萨市,LXA,ZULS,Lhasa Gonggar", "country": "CN"},
     {"city_name": "第比利斯", "city_code": "tbs", "aliases": "Tbilisi,TBS", "country": "格鲁吉亚"},
     {"city_name": "Tbilisi", "city_code": "tbs", "aliases": "第比利斯,TBS", "country": "GE"},
     {"city_name": "东京", "city_code": "tyo", "aliases": "Tokyo,TYO,NRT,HND", "country": "日本"},

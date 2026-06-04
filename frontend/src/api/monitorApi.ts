@@ -10,6 +10,7 @@ export const monitorApi = {
   remove: (id: string | number) => apiDelete<{ deleted: boolean }>(`/api/monitors/${id}`),
   toggle: (id: string | number) => apiPost<Monitor>(`/api/monitors/${id}/toggle`),
   scanNow: (id: string | number) => apiPost<{ scan_id: number; scan_no: string }>(`/api/monitors/${id}/scan-now`),
+  cancelRunningScan: (id: string | number) => apiPost(`/api/monitors/${id}/cancel-running-scan`),
   getSchedule: (id: string | number) => apiGet<MonitorSchedulePayload & { next_scan_time?: string | null; last_scan_time?: string | null; last_scan_status?: string | null }>(`/api/monitors/${id}/schedule`),
   updateSchedule: (id: string | number, payload: MonitorSchedulePayload) => apiPut<Monitor>(`/api/monitors/${id}/schedule`, payload),
   toggleSchedule: (id: string | number) => apiPost<Monitor>(`/api/monitors/${id}/schedule/toggle`),

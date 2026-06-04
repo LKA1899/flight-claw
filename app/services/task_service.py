@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants import (
+    STATUS_CANCEL_REQUESTED,
+    STATUS_CANCELLED,
     PLATFORM_CTRIP,
     QUERY_DIRECT,
     QUERY_HIDDEN_CITY,
@@ -68,6 +70,18 @@ def reset_task(db: Session, task_id: int) -> FlightQueryTask:
     return task
 
 
+def cancel_task(db: Session, task_id: int) -> FlightQueryTask:
+    task = get_task(db, task_id)
+    if task.status == STATUS_RUNNING:
+        task.status = STATUS_CANCEL_REQUESTED
+    elif task.status in {STATUS_PENDING, STATUS_FAILED, STATUS_PARTIAL_SUCCESS, STATUS_CANCEL_REQUESTED}:
+        task.status = STATUS_CANCELLED
+        task.end_time = datetime.now()
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def pending_ctrip_tasks_for_batch(db: Session, batch_no: str) -> list[FlightQueryTask]:
     return list(
         db.scalars(
@@ -89,7 +103,7 @@ def successful_tasks_with_snapshot_for_batch(db: Session, batch_no: str) -> list
             .where(
                 FlightQueryTask.batch_no == batch_no,
                 FlightQueryTask.status == STATUS_SUCCESS,
-                (FlightQueryTask.text_path.is_not(None) | FlightQueryTask.html_path.is_not(None)),
+                FlightQueryTask.text_path.is_not(None),
             )
             .order_by(FlightQueryTask.id)
         )
@@ -109,9 +123,11 @@ def refresh_batch_counts(db: Session, batch_no: str) -> None:
     batch.success_task_count = sum(1 for task in tasks if task.status == STATUS_SUCCESS)
     batch.failed_task_count = sum(1 for task in tasks if task.status == STATUS_FAILED)
     running_count = sum(1 for task in tasks if task.status == STATUS_RUNNING)
+    cancel_requested_count = sum(1 for task in tasks if task.status == STATUS_CANCEL_REQUESTED)
+    cancelled_count = sum(1 for task in tasks if task.status == STATUS_CANCELLED)
     pending_count = sum(1 for task in tasks if task.status == STATUS_PENDING)
     completed_count = batch.success_task_count + partial_count + batch.failed_task_count
-    if running_count or (pending_count and completed_count):
+    if running_count or cancel_requested_count or (pending_count and completed_count):
         batch.status = STATUS_RUNNING
         batch.end_time = None
     elif pending_count:
@@ -119,6 +135,9 @@ def refresh_batch_counts(db: Session, batch_no: str) -> None:
         batch.end_time = None
     elif tasks and batch.success_task_count == len(tasks):
         batch.status = STATUS_SUCCESS
+        batch.end_time = datetime.now()
+    elif tasks and cancelled_count == len(tasks):
+        batch.status = STATUS_CANCELLED
         batch.end_time = datetime.now()
     elif tasks and batch.failed_task_count == len(tasks):
         batch.status = STATUS_FAILED

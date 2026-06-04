@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
-from app.constants import STATUS_RUNNING, TRIGGER_SCHEDULED
+from app.constants import STATUS_CANCEL_REQUESTED, STATUS_QUEUED, STATUS_RUNNING, TRIGGER_SCHEDULED
 from app.db import SessionLocal
 from app.models import FlightMonitor, FlightScan
 from app.services.scan_runner import scan_monitor
@@ -18,7 +18,7 @@ def _run_scheduled_monitor_scan(monitor_id: int) -> None:
             running = db.scalar(
                 select(FlightScan).where(
                     FlightScan.monitor_id == monitor_id,
-                    FlightScan.status == STATUS_RUNNING,
+                    FlightScan.status.in_([STATUS_QUEUED, STATUS_RUNNING, STATUS_CANCEL_REQUESTED]),
                 )
             )
             monitor = db.get(FlightMonitor, monitor_id)

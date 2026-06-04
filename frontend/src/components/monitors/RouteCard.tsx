@@ -13,11 +13,13 @@ type RouteCardProps = {
   onDelete: () => void;
   onToggle: () => void;
   onScan: () => void;
+  onCancelScan?: () => void;
   scanning?: boolean;
 };
 
-export function RouteCard({ monitor, onDelete, onToggle, onScan, scanning }: RouteCardProps) {
+export function RouteCard({ monitor, onDelete, onToggle, onScan, onCancelScan, scanning }: RouteCardProps) {
   const scanMode = monitor.trip_type === "ROUND_TRIP" ? (monitor.roundtrip_expand_return ? "深度扫描" : "轻量扫描") : "单程扫描";
+  const hasActiveScan = ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(String(monitor.last_scan_status || ""));
 
   return (
     <Card className="p-5">
@@ -70,7 +72,11 @@ export function RouteCard({ monitor, onDelete, onToggle, onScan, scanning }: Rou
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <Button asChild size="sm"><Link to={`/monitors/${monitor.id}`}>查看</Link></Button>
         <Button asChild size="sm" variant="secondary"><Link to={`/monitors/${monitor.id}/edit#dates`}><Calendar className="h-4 w-4" />日期</Link></Button>
-        <Button size="sm" variant="secondary" onClick={onScan} disabled={scanning || !monitor.enabled}><Play className="h-4 w-4" />{scanning ? "启动中" : "立即扫描"}</Button>
+        {hasActiveScan && onCancelScan ? (
+          <Button size="sm" variant="outline" onClick={onCancelScan}>停止扫描</Button>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={onScan} disabled={scanning || !monitor.enabled}><Play className="h-4 w-4" />{scanning ? "启动中" : "立即扫描"}</Button>
+        )}
         <Button asChild size="sm" variant="secondary"><Link to={`/monitors/${monitor.id}/schedule`}>定时</Link></Button>
         {monitor.allow_train_positioning ? <Button asChild size="sm" variant="secondary"><Link to={`/monitors/${monitor.id}/positionings`}><MapPin className="h-4 w-4" />接驳</Link></Button> : null}
         {monitor.allow_transfer ? <Button asChild size="sm" variant="secondary"><Link to={`/monitors/${monitor.id}/transfers`}><Route className="h-4 w-4" />中转</Link></Button> : null}
