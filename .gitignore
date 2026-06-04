@@ -2,6 +2,7 @@
 .env.local
 .env.*.local
 .env.production
+.env.production.example
 
 __pycache__/
 *.py[cod]
@@ -30,6 +31,9 @@ frontend/tsconfig.tsbuildinfo
 
 .codex-run-logs/
 .tmp-gh/
+.claude/
+CLAUDE.md
+docs/CLAUDE_PACKAGE_DEPLOY_SKILL.md
 .claude/settings.local.json
 *.log
 captcha_test.png
