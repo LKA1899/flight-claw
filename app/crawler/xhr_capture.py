@@ -21,12 +21,14 @@ class XhrCapture:
         stage: str,
         enabled: bool,
         pattern: str,
+        artifact_meta: dict[str, Any] | None = None,
         max_body_bytes: int = 2_000_000,
     ):
         self.task_id = task_id
         self.stage = stage
         self.enabled = enabled and bool(pattern)
         self.pattern = re.compile(pattern, re.IGNORECASE) if pattern else None
+        self.artifact_meta = artifact_meta or {}
         self.max_body_bytes = max_body_bytes
         self.path = DATA_DIR / "xhr" / f"task_{task_id}_{stage}.jsonl"
         self.count = 0
@@ -49,7 +51,11 @@ class XhrCapture:
                 artifact_type=ARTIFACT_XHR,
                 path=str(self.path),
                 label=self.stage,
-                meta={"captured_count": self.count, "pattern": self.pattern.pattern if self.pattern else ""},
+                meta={
+                    "captured_count": self.count,
+                    "pattern": self.pattern.pattern if self.pattern else "",
+                    **self.artifact_meta,
+                },
             )
         self._recorded = True
         return str(self.path)

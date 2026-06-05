@@ -61,13 +61,14 @@ def main() -> None:
             stage="probe_ctrip_result",
             enabled=True,
             pattern=profile.capture_xhr_pattern,
+            artifact_meta=profile.artifact_meta(),
         )
         capture.attach(page)
         page.goto(url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
         try:
             _wait_for_result_or_fail(page, task_id=None)
         finally:
-            screenshot_path, text_path = _save_snapshot(page, task_id, label="probe_ctrip_result")
+            screenshot_path, text_path = _save_snapshot(page, task_id, label="probe_ctrip_result", profile=profile)
             xhr_path = capture.finalize()
             text = _page_visible_text(page)
             state = _classify_page_text(page) or "RESULT"

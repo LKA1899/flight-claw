@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import random
 import sys
@@ -33,14 +34,15 @@ from app.constants import (
     STATUS_SUCCESS,
     TRIP_ROUND_TRIP,
 )
-from app.crawler.browser_engine import BrowserProfile, is_profile_lock_error, launch_persistent_browser_context
+from app.crawler.browser_engine import BrowserLaunchResult, BrowserProfile, is_profile_lock_error, launch_persistent_browser_context
 from app.crawler.xhr_capture import XhrCapture
 from app.db import DATA_DIR, SessionLocal
 from app.models import FlightQueryTask, FlightRoundTripOutbound
 from app.parsers.ctrip_parser import normalize_text
 from app.services.city_code_service import resolve_city_code
-from app.services.settings_service import get_headless
+from app.services.settings_service import get_browser_profile_settings, get_headless
 from app.services.artifact_service import create_task_artifact
+from app.services.fingerprint_state_service import get_penalty_index, record_fingerprint_result
 from app.services.roundtrip_service import (
     RETURN_EXPAND_FAILED,
     RETURN_EXPANDING,
@@ -176,6 +178,38 @@ def _build_failure_message(exc: Exception, page: Page | None = None) -> str:
     if suffix and suffix not in base_message:
         return f"{PAGE_UNKNOWN}: {base_message}, {suffix}"
     return f"{PAGE_UNKNOWN}: {base_message}"
+
+
+def _merge_meta(*parts: dict | None) -> dict:
+    merged: dict = {}
+    for part in parts:
+        if part:
+            merged.update(part)
+    return merged
+
+
+def _runtime_meta(
+    *,
+    profile: BrowserProfile,
+    launch: BrowserLaunchResult | None = None,
+    retry_attempt: int = 0,
+) -> dict:
+    return _merge_meta(
+        profile.artifact_meta(),
+        launch.artifact_meta() if launch else None,
+        {"retry_attempt": retry_attempt},
+    )
+
+
+def _should_retry_with_fallback(error_type: str, settings: dict, retry_attempt: int) -> bool:
+    max_attempts = int(settings.get("browser_retry_max_attempts") or 0)
+    if retry_attempt >= max_attempts:
+        return False
+    if error_type == PAGE_VERIFICATION_REQUIRED:
+        return bool(settings.get("browser_retry_on_verification", True))
+    if error_type == PAGE_PROFILE_LOCKED:
+        return bool(settings.get("browser_retry_on_profile_lock", True))
+    return False
 
 
 def _looks_like_result_list(page: Page) -> bool:
@@ -587,6 +621,8 @@ def _record_artifact(
     path: str | None,
     label: str | None = None,
     meta: dict | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
 ) -> None:
     if not path:
         return
@@ -599,13 +635,20 @@ def _record_artifact(
                 artifact_type=artifact_type,
                 path=path,
                 label=label,
-                meta=meta,
+                meta=_merge_meta(meta, profile.artifact_meta() if profile else None, runtime_meta),
             )
     except Exception as exc:
         log(f"artifact record failed: {exc}")
 
 
-def _save_snapshot(page: Page, task_id: int, failed: bool = False, label: str | None = None) -> tuple[str | None, str | None]:
+def _save_snapshot(
+    page: Page,
+    task_id: int,
+    failed: bool = False,
+    label: str | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
+) -> tuple[str | None, str | None]:
     suffix = "_failed" if failed else ""
     middle = f"_{label}" if label else ""
     screenshot_path = DATA_DIR / "screenshots" / f"task_{task_id}{middle}{suffix}.png"
@@ -626,6 +669,8 @@ def _save_snapshot(page: Page, task_id: int, failed: bool = False, label: str | 
             path=saved_screenshot,
             label=label,
             meta={"failed": failed},
+            profile=profile,
+            runtime_meta=runtime_meta,
         )
     except PlaywrightError as exc:
         log(f"screenshot save failed: {exc}")
@@ -641,6 +686,8 @@ def _save_snapshot(page: Page, task_id: int, failed: bool = False, label: str | 
             path=saved_text,
             label=label,
             meta={"failed": failed},
+            profile=profile,
+            runtime_meta=runtime_meta,
         )
     except Exception as exc:
         log(f"visible text save failed: {exc}")
@@ -655,11 +702,20 @@ def _try_capture_failure_artifacts(
     label: str | None = None,
     current_screenshot_path: str | None = None,
     current_text_path: str | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
 ) -> tuple[str | None, str | None]:
     if not page:
         return current_screenshot_path, current_text_path
     try:
-        screenshot_path, text_path = _save_snapshot(page, task_id, failed=True, label=label)
+        screenshot_path, text_path = _save_snapshot(
+            page,
+            task_id,
+            failed=True,
+            label=label,
+            profile=profile,
+            runtime_meta=runtime_meta,
+        )
     except Exception as exc:
         log(f"娣囨繂鐡ㄦ径杈Е閻滄澘婧€閺冭泛褰傞悽鐔风磽鐢? {exc}")
         return current_screenshot_path, current_text_path
@@ -701,6 +757,8 @@ def _expand_roundtrip_returns(
     page: Page,
     task_id: int,
     outbound_url: str,
+    profile: BrowserProfile,
+    runtime_meta: dict | None = None,
 ) -> dict:
     total_returns = 0
     total_plans = 0
@@ -726,7 +784,13 @@ def _expand_roundtrip_returns(
             _wait_for_result_or_fail(page, task_id)
             _click_outbound_by_rank(page, rank)
             _wait_for_result_or_fail(page, task_id)
-            screenshot_path, text_path = _save_snapshot(page, task_id, label=f"outbound_rank_{rank}_return")
+            screenshot_path, text_path = _save_snapshot(
+                page,
+                task_id,
+                label=f"outbound_rank_{rank}_return",
+                profile=profile,
+                runtime_meta=runtime_meta,
+            )
             if not text_path:
                 raise PageStateError(PAGE_STRUCTURE_CHANGED, f"return snapshot text was not saved for outbound rank {rank}")
             with SessionLocal() as db:
@@ -743,7 +807,14 @@ def _expand_roundtrip_returns(
             failed += 1
             failure_message = _build_failure_message(exc, page)
             if page:
-                _save_snapshot(page, task_id, failed=True, label=f"outbound_rank_{rank}_return")
+                _save_snapshot(
+                    page,
+                    task_id,
+                    failed=True,
+                    label=f"outbound_rank_{rank}_return",
+                    profile=profile,
+                    runtime_meta=runtime_meta,
+                )
             with SessionLocal() as db:
                 mark_outbound_status(db, outbound.id, RETURN_EXPAND_FAILED)
             outbound_errors.append(
@@ -764,6 +835,135 @@ def _expand_roundtrip_returns(
     }
 
 
+def _run_ctrip_attempt(
+    playwright,
+    *,
+    task_id: int,
+    task_data: dict,
+    retry_attempt: int,
+    browser_profile_settings: dict,
+) -> dict:
+    page = None
+    browser = None
+    launch: BrowserLaunchResult | None = None
+    profile = BrowserProfile.from_settings(
+        headless=get_headless(),
+        task_id=task_id,
+        monitor_id=task_data["monitor_id"],
+        route_key=task_data["route_key"],
+        date_bucket=task_data["date_bucket"],
+        penalty_index=task_data["penalty_index"],
+    )
+    if retry_attempt > 0:
+        profile.session_mode = str(browser_profile_settings.get("browser_fallback_mode") or "isolated_ephemeral")
+    screenshot_path = None
+    text_path = None
+    xhr_capture: XhrCapture | None = None
+    xhr_path = None
+    roundtrip_parsed_count = None
+    roundtrip_expand_result = None
+    try:
+        log(f"browser mode: {'headless' if profile.headless else 'headed'}")
+        launch = _launch_browser_context(playwright, task_id, profile)
+        browser = launch.context
+        runtime_meta = _runtime_meta(profile=profile, launch=launch, retry_attempt=retry_attempt)
+        log(
+            "Browser context started: "
+            f"session_mode={launch.session_mode}, dir={launch.profile_dir}, "
+            f"fingerprint={profile.fingerprint_name}, retry_attempt={retry_attempt}"
+        )
+        page = browser.pages[0] if browser.pages else browser.new_page()
+        page.set_default_timeout(30_000)
+        xhr_capture = XhrCapture(
+            task_id=task_id,
+            stage="ctrip_result",
+            enabled=profile.capture_xhr_enabled,
+            pattern=profile.capture_xhr_pattern,
+            artifact_meta=runtime_meta,
+        )
+        xhr_capture.attach(page)
+        try:
+            target_url = (
+                _build_roundtrip_list_url(type("TaskStub", (), task_data))
+                if task_data["trip_type"] == TRIP_ROUND_TRIP
+                else _build_list_url(type("TaskStub", (), task_data))
+            )
+            log(f"open result page: {target_url}")
+            try:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+            except PlaywrightTimeoutError as exc:
+                _raise_page_error(PAGE_LOAD_TIMEOUT, f"page navigation timed out: {exc}", page)
+
+            _wait_for_result_or_fail(page, task_id)
+            _validate_result_context(page, type("TaskStub", (), task_data), target_url)
+            snapshot_label = "roundtrip_outbound" if task_data["trip_type"] == TRIP_ROUND_TRIP else None
+            screenshot_path, text_path = _save_snapshot(
+                page,
+                task_id,
+                label=snapshot_label,
+                profile=profile,
+                runtime_meta=runtime_meta,
+            )
+            if task_data["trip_type"] == TRIP_ROUND_TRIP:
+                with SessionLocal() as db:
+                    task = db.get(FlightQueryTask, task_id)
+                    if not task:
+                        raise ValueError(f"Query task not found during round-trip parse: {task_id}")
+                    task.screenshot_path = screenshot_path
+                    task.text_path = text_path
+                    task.html_path = None
+                    db.commit()
+                    parsed = parse_roundtrip_outbounds_for_task(db, task)
+                    roundtrip_parsed_count = parsed["parsed_count"]
+                    if roundtrip_parsed_count <= 0:
+                        _raise_page_error(PAGE_PARSE_ZERO_RESULT, "no outbound rows parsed", page)
+                    strategy = _strategy_from_task(task)
+                if strategy.get("roundtrip_expand_return") and roundtrip_parsed_count > 0:
+                    roundtrip_expand_result = _expand_roundtrip_returns(
+                        page,
+                        task_id,
+                        target_url,
+                        profile,
+                        runtime_meta,
+                    )
+        except Exception:
+            if xhr_capture:
+                xhr_path = xhr_capture.finalize()
+            screenshot_path, text_path = _try_capture_failure_artifacts(
+                page,
+                task_id,
+                current_screenshot_path=screenshot_path,
+                current_text_path=text_path,
+                profile=profile,
+                runtime_meta=runtime_meta,
+            )
+            raise
+        if xhr_capture:
+            xhr_path = xhr_capture.finalize()
+        return {
+            "profile": profile,
+            "launch": launch,
+            "screenshot_path": screenshot_path,
+            "text_path": text_path,
+            "xhr_path": xhr_path,
+            "roundtrip_parsed_count": roundtrip_parsed_count,
+            "roundtrip_expand_result": roundtrip_expand_result,
+            "page": page,
+        }
+    except Exception:
+        if xhr_capture and not xhr_path:
+            xhr_path = xhr_capture.finalize()
+        raise
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except PlaywrightError:
+                pass
+        if launch:
+            launch.cleanup()
+
+
 def run_ctrip_task(task_id: int) -> dict:
     _prepare_playwright_event_loop()
     browser_lock_acquired = False
@@ -773,15 +973,11 @@ def run_ctrip_task(task_id: int) -> dict:
     except TaskCancelled:
         _mark_cancelled(task_id)
         return {"task_id": task_id, "status": STATUS_CANCELLED, "message": "Task cancelled before browser start"}
-    page = None
-    browser = None
-    roundtrip_parsed_count = None
-    roundtrip_expand_result = None
     final_status = STATUS_SUCCESS
     screenshot_path = None
     text_path = None
-    xhr_capture: XhrCapture | None = None
     xhr_path = None
+    task_data: dict | None = None
     try:
         with SessionLocal() as db:
             task = db.get(FlightQueryTask, task_id)
@@ -801,87 +997,62 @@ def run_ctrip_task(task_id: int) -> dict:
             db.commit()
             task_data = {
                 "id": task.id,
+                "platform": task.platform,
                 "trip_type": task.trip_type,
                 "from_city": task.from_city,
                 "from_airports": task.monitor.from_airports if task.monitor else None,
                 "to_city": task.to_city,
                 "to_airports": task.monitor.to_airports if task.monitor else None,
+                "monitor_id": task.monitor_id,
+                "route_key": f"{task.platform}:{task.trip_type}:{task.from_city}:{task.to_city}",
+                "date_bucket": datetime.now().date().isoformat(),
                 "depart_date": task.depart_date,
                 "return_date": task.return_date,
                 "batch_no": task.batch_no,
             }
+            task_data["penalty_index"] = get_penalty_index(
+                task.platform,
+                task.monitor_id,
+                task_data["date_bucket"],
+            )
 
         _sleep_before_single_task(task_id)
+        browser_profile_settings = get_browser_profile_settings()
+        last_error_message: str | None = None
+        last_error_type: str | None = None
         with sync_playwright() as p:
-            headless = get_headless()
-            log(f"browser mode: {'headless' if headless else 'headed'}")
-            profile = BrowserProfile.from_settings(headless=headless)
-            browser, profile_mode, profile_dir = _launch_browser_context(p, task_id, profile)
-            log(f"Browser context started: mode={profile_mode}, dir={profile_dir}")
-            page = browser.pages[0] if browser.pages else browser.new_page()
-            page.set_default_timeout(30_000)
-            xhr_capture = XhrCapture(
-                task_id=task_id,
-                stage="ctrip_result",
-                enabled=profile.capture_xhr_enabled,
-                pattern=profile.capture_xhr_pattern,
-            )
-            xhr_capture.attach(page)
-            try:
+            attempt_task_data = copy.deepcopy(task_data)
+            attempt_result = None
+            for retry_attempt in range(int(browser_profile_settings.get("browser_retry_max_attempts") or 0) + 1):
                 try:
-                    target_url = (
-                        _build_roundtrip_list_url(type("TaskStub", (), task_data))
-                        if task_data["trip_type"] == TRIP_ROUND_TRIP
-                        else _build_list_url(type("TaskStub", (), task_data))
+                    attempt_result = _run_ctrip_attempt(
+                        p,
+                        task_id=task_id,
+                        task_data=attempt_task_data,
+                        retry_attempt=retry_attempt,
+                        browser_profile_settings=browser_profile_settings,
                     )
-                    log(f"open result page: {target_url}")
-                    page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
-                except PlaywrightTimeoutError as exc:
-                    _raise_page_error(PAGE_LOAD_TIMEOUT, f"page navigation timed out: {exc}", page)
-
-                _wait_for_result_or_fail(page, task_id)
-                _validate_result_context(page, type("TaskStub", (), task_data), target_url)
-                snapshot_label = "roundtrip_outbound" if task_data["trip_type"] == TRIP_ROUND_TRIP else None
-                screenshot_path, text_path = _save_snapshot(page, task_id, label=snapshot_label)
-                if task_data["trip_type"] == TRIP_ROUND_TRIP:
-                    with SessionLocal() as db:
-                        task = db.get(FlightQueryTask, task_id)
-                        if not task:
-                            raise ValueError(f"Query task not found during round-trip parse: {task_id}")
-                        task.screenshot_path = screenshot_path
-                        task.text_path = text_path
-                        task.html_path = None
-                        db.commit()
-                        parsed = parse_roundtrip_outbounds_for_task(db, task)
-                        roundtrip_parsed_count = parsed["parsed_count"]
-                        if roundtrip_parsed_count <= 0:
-                            _raise_page_error(PAGE_PARSE_ZERO_RESULT, "no outbound rows parsed", page)
-                        strategy = _strategy_from_task(task)
-                    if strategy.get("roundtrip_expand_return") and roundtrip_parsed_count > 0:
-                        roundtrip_expand_result = _expand_roundtrip_returns(
-                            page,
-                            task_id,
-                            target_url,
-                        )
-            except Exception:
-                if xhr_capture:
-                    xhr_path = xhr_capture.finalize()
-                screenshot_path, text_path = _try_capture_failure_artifacts(
-                    page,
-                    task_id,
-                    current_screenshot_path=screenshot_path,
-                    current_text_path=text_path,
-                )
-                raise
-            finally:
-                if browser:
-                    try:
-                        browser.close()
-                    except PlaywrightError:
-                        pass
-                    browser = None
-            if xhr_capture:
-                xhr_path = xhr_capture.finalize()
+                    screenshot_path = attempt_result["screenshot_path"]
+                    text_path = attempt_result["text_path"]
+                    xhr_path = attempt_result["xhr_path"]
+                    roundtrip_parsed_count = attempt_result["roundtrip_parsed_count"]
+                    roundtrip_expand_result = attempt_result["roundtrip_expand_result"]
+                    break
+                except Exception as exc:
+                    error_message = _build_failure_message(exc)
+                    error_type = _error_type_from_message(error_message)
+                    last_error_message = error_message
+                    last_error_type = error_type
+                    if not _should_retry_with_fallback(error_type, browser_profile_settings, retry_attempt):
+                        raise
+                    attempt_task_data["penalty_index"] = int(attempt_task_data.get("penalty_index") or 0) + 1
+                    log(
+                        "Retry with fallback browser session: "
+                        f"error_type={error_type}, retry_attempt={retry_attempt + 1}, "
+                        f"penalty_index={attempt_task_data['penalty_index']}"
+                    )
+            if attempt_result is None and last_error_message:
+                raise RuntimeError(last_error_message)
 
         with SessionLocal() as db:
             task = db.get(FlightQueryTask, task_id)
@@ -910,6 +1081,14 @@ def run_ctrip_task(task_id: int) -> dict:
             final_status = task.status
             db.commit()
             refresh_batch_counts(db, batch_no)
+        browser_profile_settings = get_browser_profile_settings()
+        record_fingerprint_result(
+            platform=task_data["platform"],
+            monitor_id=task_data["monitor_id"],
+            date_bucket=task_data["date_bucket"],
+            error_type=None,
+            threshold=int(browser_profile_settings.get("fingerprint_verification_switch_threshold") or 2),
+        )
         log("task succeeded")
         return {
             "task_id": task_id,
@@ -921,27 +1100,23 @@ def run_ctrip_task(task_id: int) -> dict:
     except Exception as exc:
         if isinstance(exc, TaskCancelled):
             log("task cancelled")
-            if browser:
-                try:
-                    browser.close()
-                except PlaywrightError:
-                    pass
             _mark_cancelled(task_id)
             return {
                 "task_id": task_id,
                 "status": STATUS_CANCELLED,
                 "message": "Task cancelled",
             }
-        error_message = _build_failure_message(exc, page)
+        error_message = _build_failure_message(exc)
         log(f"task failed: {error_message}")
-        if browser:
-            try:
-                browser.close()
-            except PlaywrightError:
-                pass
         _mark_failed(task_id, error_message, screenshot_path, text_path)
-        if xhr_capture and not xhr_path:
-            xhr_path = xhr_capture.finalize()
+        browser_profile_settings = get_browser_profile_settings()
+        record_fingerprint_result(
+            platform=task_data["platform"] if task_data else "ctrip",
+            monitor_id=task_data["monitor_id"] if task_data else None,
+            date_bucket=task_data["date_bucket"] if task_data else None,
+            error_type=_error_type_from_message(error_message),
+            threshold=int(browser_profile_settings.get("fingerprint_verification_switch_threshold") or 2),
+        )
         return {
             "task_id": task_id,
             "status": STATUS_FAILED,
@@ -950,8 +1125,6 @@ def run_ctrip_task(task_id: int) -> dict:
             "screenshot_path": screenshot_path,
             "text_path": text_path,
             "xhr_path": xhr_path,
-            "page_url": _safe_page_url(page),
-            "page_title": _safe_page_title(page),
         }
     finally:
         if browser_lock_acquired and _browser_lock.locked():
