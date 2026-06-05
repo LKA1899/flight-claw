@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import date
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -60,12 +61,11 @@ def analyze_best_daily(batch_no: str) -> dict:
                 .where(
                     FlightPlanResult.batch_no == batch_no,
                     FlightPlanResult.plan_type != "ROUNDTRIP_CLUE",
-                    FlightPlanResult.trip_type != TRIP_ROUND_TRIP,
                 )
                 .order_by(FlightPlanResult.monitor_id, FlightPlanResult.depart_date, FlightPlanResult.score.desc())
             )
         )
-        grouped: dict[tuple[int, object], list[FlightPlanResult]] = defaultdict(list)
+        grouped: dict[tuple[int, date], list[FlightPlanResult]] = defaultdict(list)
         for plan in plans:
             grouped[(plan.monitor_id, plan.depart_date)].append(plan)
 

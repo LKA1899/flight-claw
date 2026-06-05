@@ -25,6 +25,7 @@ from app.constants import (
 )
 from app.db import SessionLocal
 from app.models import FlightMonitor, FlightPlanResult, FlightPositioningCity, FlightPriceRaw, FlightRoundTripOutbound
+from app.models import FlightRoundTripPlan
 from app.services.positioning_service import find_positioning_for_price
 
 HIDDEN_CITY_WARNING = (
@@ -383,6 +384,95 @@ def generate_plans_from_outbounds(batch_no: str) -> dict:
                 updated += 1
         db.commit()
         return {"batch_no": batch_no, "generated": generated, "updated": updated, "source_count": len(outbounds)}
+
+
+def generate_plans_from_roundtrip_plans(batch_no: str) -> dict:
+    with SessionLocal() as db:
+        roundtrip_plans = list(
+            db.scalars(
+                select(FlightRoundTripPlan)
+                .where(FlightRoundTripPlan.batch_no == batch_no)
+                .order_by(
+                    FlightRoundTripPlan.monitor_id,
+                    FlightRoundTripPlan.depart_date,
+                    FlightRoundTripPlan.total_price.asc(),
+                )
+            )
+        )
+        generated = 0
+        updated = 0
+        for plan in roundtrip_plans:
+            key = f"ROUNDTRIP_TICKET|{plan.batch_no}|{plan.monitor_id}|{plan.depart_date}|{plan.id}"
+            unique_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+            existing = db.scalar(select(FlightPlanResult).where(FlightPlanResult.unique_hash == unique_hash))
+            outbound = plan.outbound
+            return_row = plan.return_flight
+            from_city = outbound.from_city if outbound else None
+            to_city = outbound.to_city if outbound else None
+            airline_text = " / ".join(
+                [
+                    text
+                    for text in [
+                        outbound.flight_no if outbound and outbound.flight_no else None,
+                        return_row.flight_no if return_row and return_row.flight_no else None,
+                    ]
+                    if text
+                ]
+            )
+            route_text = f"{from_city} ↔ {to_city}" if from_city and to_city else "Round trip"
+            title = f"ROUNDTRIP_TICKET 路 {route_text}"
+            if airline_text:
+                title = f"{title} 路 {airline_text}"
+            title = f"{title} 路 {plan.currency} {plan.total_price:.0f}"
+            detail_json = json.dumps(
+                {
+                    "roundtrip_plan_id": plan.id,
+                    "outbound_id": plan.outbound_id,
+                    "return_id": plan.return_id,
+                    "outbound_summary": plan.outbound_summary,
+                    "return_summary": plan.return_summary,
+                    "data_completeness": plan.data_completeness,
+                    "price_type": plan.price_type,
+                    "is_complete_plan": plan.is_complete_plan,
+                },
+                ensure_ascii=False,
+            )
+            row = existing or FlightPlanResult(
+                batch_no=plan.batch_no,
+                monitor_id=plan.monitor_id,
+                depart_date=plan.depart_date,
+                return_date=plan.return_date,
+                trip_type=TRIP_ROUND_TRIP,
+                plan_type="ROUNDTRIP_TICKET",
+                source_task_ids=str(plan.task_id),
+                source_price_ids=f"{plan.outbound_id},{plan.return_id}",
+                unique_hash=unique_hash,
+            )
+            row.return_date = plan.return_date
+            row.trip_type = TRIP_ROUND_TRIP
+            row.plan_type = "ROUNDTRIP_TICKET"
+            row.title = title
+            row.total_price = plan.total_price
+            row.currency = plan.currency
+            row.total_duration_minutes = plan.total_duration_minutes
+            row.transfer_count = int(plan.total_transfer_count or 0)
+            row.risk_level = plan.risk_level or RISK_LOW
+            row.score = float(plan.score or 0)
+            row.reason = plan.reason
+            row.warning = plan.warning
+            row.detail_json = detail_json
+            if not existing:
+                db.add(row)
+                generated += 1
+            else:
+                updated += 1
+        db.commit()
+        return {
+            "batch_no": batch_no,
+            "generated": generated,
+            "updated": updated,
+            "source_count": len(roundtrip_plans),
+        }
 
 
 def list_plans(

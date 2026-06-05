@@ -38,7 +38,11 @@ from app.services.analyze_service import analyze_best_daily
 from app.services.city_code_service import validate_monitor_city_codes
 from app.services.monitor_service import get_monitor
 from app.services.notify_service import send_and_log_notification
-from app.services.plan_service import generate_plans_for_batch, generate_plans_from_outbounds
+from app.services.plan_service import (
+    generate_plans_for_batch,
+    generate_plans_from_outbounds,
+    generate_plans_from_roundtrip_plans,
+)
 from app.services.price_parse_service import parse_task_price
 from app.services.scan_service import create_scan, refresh_scan_counts
 from app.services.settings_service import get_scan_interval_range
@@ -328,7 +332,9 @@ class ScanPipeline:
             return {"message": "No generated tasks; analysis skipped.", "status": STATUS_SKIPPED}
         plan_result = generate_plans_for_batch(batch_no)
         outbound_plan_result = generate_plans_from_outbounds(batch_no)
+        roundtrip_plan_result = generate_plans_from_roundtrip_plans(batch_no)
         plan_result["outbound_clues"] = outbound_plan_result
+        plan_result["roundtrip_tickets"] = roundtrip_plan_result
         analyze_result = analyze_best_daily(batch_no)
         with SessionLocal() as db:
             roundtrip_plan_count = db.scalar(select(func.count(FlightRoundTripPlan.id)).where(FlightRoundTripPlan.batch_no == batch_no)) or 0

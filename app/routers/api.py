@@ -543,7 +543,12 @@ def roundtrip_plan_dict(item: FlightRoundTripPlan) -> dict[str, Any]:
 
 
 def plan_dict(item: FlightPlanResult) -> dict[str, Any]:
-    source_type = "ROUNDTRIP_CLUE" if item.plan_type == "ROUNDTRIP_CLUE" else "ONE_WAY_PLAN"
+    if item.plan_type == "ROUNDTRIP_CLUE":
+        source_type = "ROUNDTRIP_CLUE"
+    elif item.plan_type == "ROUNDTRIP_TICKET":
+        source_type = "ROUNDTRIP_PLAN"
+    else:
+        source_type = "ONE_WAY_PLAN"
     result: dict[str, Any] = {
         "id": item.id,
         "batch_no": item.batch_no,
@@ -551,10 +556,16 @@ def plan_dict(item: FlightPlanResult) -> dict[str, Any]:
         "monitor_name": item.monitor.monitor_name if item.monitor else None,
         "depart_date": dt(item.depart_date),
         "return_date": dt(item.return_date),
-        "trip_type": "ROUND_TRIP" if source_type == "ROUNDTRIP_CLUE" else item.trip_type,
+        "trip_type": "ROUND_TRIP" if source_type in {"ROUNDTRIP_CLUE", "ROUNDTRIP_PLAN"} else item.trip_type,
         "plan_type": item.plan_type,
         "source_type": source_type,
-        "price_type": "ROUND_TRIP_STARTING_PRICE" if source_type == "ROUNDTRIP_CLUE" else "ONE_WAY_PRICE",
+        "price_type": (
+            "ROUND_TRIP_STARTING_PRICE"
+            if source_type == "ROUNDTRIP_CLUE"
+            else "ROUND_TRIP_TOTAL"
+            if source_type == "ROUNDTRIP_PLAN"
+            else "ONE_WAY_PRICE"
+        ),
         "title": item.title,
         "from_city": item.monitor.from_city if item.monitor else None,
         "to_city": item.monitor.to_city if item.monitor else None,
@@ -569,17 +580,23 @@ def plan_dict(item: FlightPlanResult) -> dict[str, Any]:
         "detail_json": item.detail_json,
         "create_time": dt(item.create_time),
     }
-    if source_type == "ROUNDTRIP_CLUE" and item.detail_json:
+    if source_type in {"ROUNDTRIP_CLUE", "ROUNDTRIP_PLAN"} and item.detail_json:
         try:
             detail = json.loads(item.detail_json)
-            result["outbound_airline"] = detail.get("airline")
-            result["outbound_flight_no"] = detail.get("flight_no")
-            result["outbound_depart_time"] = detail.get("depart_time")
-            result["outbound_arrive_time"] = detail.get("arrive_time")
-            result["outbound_depart_airport"] = detail.get("depart_airport")
-            result["outbound_arrive_airport"] = detail.get("arrive_airport")
-            result["return_detail_status"] = detail.get("return_detail_status")
             result["data_completeness"] = detail.get("data_completeness")
+            if source_type == "ROUNDTRIP_CLUE":
+                result["outbound_airline"] = detail.get("airline")
+                result["outbound_flight_no"] = detail.get("flight_no")
+                result["outbound_depart_time"] = detail.get("depart_time")
+                result["outbound_arrive_time"] = detail.get("arrive_time")
+                result["outbound_depart_airport"] = detail.get("depart_airport")
+                result["outbound_arrive_airport"] = detail.get("arrive_airport")
+                result["return_detail_status"] = detail.get("return_detail_status")
+            else:
+                result["return_detail_status"] = "EXPANDED"
+                result["outbound_summary"] = detail.get("outbound_summary")
+                result["return_summary"] = detail.get("return_summary")
+                result["roundtrip_plan_id"] = detail.get("roundtrip_plan_id")
         except (json.JSONDecodeError, TypeError):
             pass
     return result
@@ -1201,62 +1218,14 @@ def plans(
         stmt = stmt.where(FlightPlanResult.return_date == parsed_return)
 
     if source_type == "ONE_WAY_PLAN":
-        stmt = stmt.where(FlightPlanResult.plan_type != "ROUNDTRIP_CLUE")
+        stmt = stmt.where(FlightPlanResult.plan_type.not_in(["ROUNDTRIP_CLUE", "ROUNDTRIP_TICKET"]))
     elif source_type == "ROUNDTRIP_CLUE":
         stmt = stmt.where(FlightPlanResult.plan_type == "ROUNDTRIP_CLUE")
+    elif source_type == "ROUNDTRIP_PLAN":
+        stmt = stmt.where(FlightPlanResult.plan_type == "ROUNDTRIP_TICKET")
 
     plan_rows = list(db.scalars(stmt))
     all_items: list[dict[str, Any]] = [plan_dict(p) for p in plan_rows]
-
-    if include_roundtrip_plans and source_type != "ROUNDTRIP_CLUE":
-        rt_q = (
-            select(FlightRoundTripPlan)
-            .options(
-                selectinload(FlightRoundTripPlan.monitor),
-                selectinload(FlightRoundTripPlan.outbound),
-            )
-        )
-        if latest_scan_only and latest_batches is not None:
-            rt_q = rt_q.where(FlightRoundTripPlan.batch_no.in_(latest_batches))
-        rts = list(db.scalars(rt_q))
-        # Collect scan times for roundtrip plan sorting
-        rt_scan_times: dict[str, datetime] = {}
-        if rts:
-            rt_bns = {rt.batch_no for rt in rts if rt.batch_no}
-            if rt_bns:
-                rt_scans = list(
-                    db.scalars(
-                        select(FlightScan).where(FlightScan.batch_no.in_(rt_bns))
-                    )
-                )
-                rt_scan_times = {s.batch_no: s.start_time for s in rt_scans if s.batch_no and s.start_time}
-
-        for rt in rts:
-            if batch_no and rt.batch_no != batch_no:
-                continue
-            if monitor_id and rt.monitor_id != monitor_id:
-                continue
-            if parsed_date := (parse_date(depart_date) if depart_date else None):
-                if rt.depart_date != parsed_date:
-                    continue
-            if parsed_ret := (parse_date(return_date) if return_date else None):
-                if rt.return_date != parsed_ret:
-                    continue
-            if trip_type and trip_type != "ROUND_TRIP":
-                continue
-            if risk_level and rt.risk_level != risk_level:
-                continue
-            all_items.append(roundtrip_plan_as_plan_dict(rt))
-
-        if source_type == "ROUNDTRIP_PLAN":
-            all_items = [item for item in all_items if item.get("source_type") == "ROUNDTRIP_PLAN"]
-
-        def _rt_sort_key(item: dict[str, Any]) -> tuple[float, float]:
-            st = rt_scan_times.get(item.get("batch_no") or "")
-            ts = -st.timestamp() if st else float("-inf")
-            return (ts, item.get("total_price") or 0)
-
-        all_items.sort(key=_rt_sort_key)
 
     total = len(all_items)
     p = max(1, page)
