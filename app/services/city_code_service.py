@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import PLATFORM_CTRIP
 from app.db import SessionLocal
-from app.models import FlightCityCode
+from app.models import FlightCityCode, FlightMonitor
 
 
 DEFAULT_CTRIP_CITY_CODES: list[dict[str, str]] = [
@@ -257,3 +257,40 @@ def resolve_city_code(
             session.close()
 
     raise ValueError(f"No {platform} city code mapping for city: {city_name}. Add it to flight_city_code first.")
+
+
+def validate_monitor_city_codes(db: Session, monitor: FlightMonitor) -> None:
+    invalid_cities: list[str] = []
+    checked_keys: set[tuple[str, str, str | None]] = set()
+
+    def check_city(city_name: str | None, airports: str | None = None) -> None:
+        normalized_name = (city_name or "").strip()
+        key = (monitor.platform, normalized_name, (airports or "").strip() or None)
+        if not normalized_name or key in checked_keys:
+            return
+        checked_keys.add(key)
+        try:
+            resolve_city_code(
+                normalized_name,
+                airports=airports,
+                platform=monitor.platform,
+                db=db,
+            )
+        except ValueError:
+            invalid_cities.append(normalized_name)
+
+    check_city(monitor.from_city, monitor.from_airports)
+    check_city(monitor.to_city, monitor.to_airports)
+
+    if monitor.allow_train_positioning:
+        from app.services.positioning_service import enabled_positionings
+
+        for positioning in enabled_positionings(db, monitor.id):
+            check_city(positioning.positioning_city)
+
+    if invalid_cities:
+        city_list = ", ".join(invalid_cities)
+        raise ValueError(
+            f"Monitor {monitor.id} has unresolved city codes for platform {monitor.platform}: {city_list}. "
+            "Add them to flight_city_code before starting the scan."
+        )

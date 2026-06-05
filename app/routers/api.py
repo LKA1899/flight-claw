@@ -764,7 +764,10 @@ def toggle_monitor(monitor_id: int, db: Session = Depends(get_db)):
 
 @router.post("/monitors/{monitor_id}/scan-now")
 def scan_monitor_now(monitor_id: int, db: Session = Depends(get_db)):
-    scan = scan_monitor(db, monitor_id, TRIGGER_MANUAL)
+    try:
+        scan = scan_monitor(db, monitor_id, TRIGGER_MANUAL)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ok({"scan_id": scan.id, "scan_no": scan.scan_no, "status": scan.status})
 
 

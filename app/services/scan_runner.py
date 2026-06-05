@@ -35,6 +35,7 @@ from app.models import (
     FlightScanStepLog,
 )
 from app.services.analyze_service import analyze_best_daily
+from app.services.city_code_service import validate_monitor_city_codes
 from app.services.monitor_service import get_monitor
 from app.services.notify_service import send_and_log_notification
 from app.services.plan_service import generate_plans_for_batch, generate_plans_from_outbounds
@@ -511,6 +512,7 @@ def dispatch_queued_scans() -> None:
 
 def scan_monitor(db, monitor_id: int, trigger_type: str = TRIGGER_MANUAL) -> FlightScan:
     monitor = get_monitor(db, monitor_id)
+    validate_monitor_city_codes(db, monitor)
     active = _active_scan_for_monitor(db, monitor_id)
     if active:
         return active
