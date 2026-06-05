@@ -1,12 +1,11 @@
 import asyncio
+import copy
 import json
-import os
 import random
 import sys
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.sync_api import Error as PlaywrightError
@@ -14,12 +13,13 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from app.constants import (
+    ARTIFACT_SCREENSHOT,
+    ARTIFACT_TEXT,
     COMPLETENESS_OUTBOUND_WITH_STARTING_PRICE,
     PAGE_CONTEXT_MISMATCH,
     PAGE_DATE_DRIFT,
     PAGE_LOAD_TIMEOUT,
     PAGE_LOGIN_REQUIRED,
-    PAGE_MANUAL_TAKEOVER_TIMEOUT,
     PAGE_PARSE_ZERO_RESULT,
     PAGE_PROFILE_LOCKED,
     PAGE_STRUCTURE_CHANGED,
@@ -34,11 +34,15 @@ from app.constants import (
     STATUS_SUCCESS,
     TRIP_ROUND_TRIP,
 )
+from app.crawler.browser_engine import BrowserLaunchResult, BrowserProfile, is_profile_lock_error, launch_persistent_browser_context
+from app.crawler.xhr_capture import XhrCapture
 from app.db import DATA_DIR, SessionLocal
 from app.models import FlightQueryTask, FlightRoundTripOutbound
 from app.parsers.ctrip_parser import normalize_text
 from app.services.city_code_service import resolve_city_code
-from app.services.settings_service import get_headless
+from app.services.settings_service import get_browser_profile_settings, get_headless
+from app.services.artifact_service import create_task_artifact
+from app.services.fingerprint_state_service import get_penalty_index, record_fingerprint_result
 from app.services.roundtrip_service import (
     RETURN_EXPAND_FAILED,
     RETURN_EXPANDING,
@@ -54,9 +58,7 @@ CTRIP_LIST_URL = "https://flights.ctrip.com/online/list/oneway-{from_code}-{to_c
 CTRIP_ROUNDTRIP_LIST_URL = "https://flights.ctrip.com/online/list/round-{from_code}-{to_code}"
 GOTO_TIMEOUT_MS = 60_000
 RESULT_TIMEOUT_MS = 120_000
-MANUAL_CONTINUE_TIMEOUT_MS = 15 * 60_000
 _browser_lock = threading.Lock()
-_PROFILE_LOCK_FILE_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
 
 def _prepare_playwright_event_loop() -> None:
@@ -69,10 +71,6 @@ class PageStateError(RuntimeError):
         super().__init__(f"{error_type}: {message}")
         self.error_type = error_type
         self.message = message
-
-
-class ManualInterventionRequired(PageStateError):
-    """Raised when the user must handle login, captcha, or changed page structure."""
 
 
 class TaskCancelled(RuntimeError):
@@ -115,58 +113,14 @@ def _acquire_browser_lock(task_id: int) -> None:
         time.sleep(2)
 
 
-def _profile_dir_candidates(task_id: int) -> list[tuple[str, Path, bool]]:
-    shared_dir = DATA_DIR / "browser_profile" / "ctrip"
-    isolated_dir = shared_dir / f"task_{task_id}"
-    return [
-        ("shared", shared_dir, True),
-        ("isolated", isolated_dir, True),
-    ]
-
-
-def _clear_profile_lock_files(profile_dir: Path) -> None:
-    for file_name in _PROFILE_LOCK_FILE_NAMES:
-        lock_path = profile_dir / file_name
-        try:
-            if lock_path.exists():
-                lock_path.unlink()
-        except OSError:
-            continue
-
-
-def _is_profile_lock_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return "profile appears to be in use" in message or "process_singleton" in message
-
-
-def _launch_browser_context(playwright, task_id: int, headless: bool, executable_path: str | None):
-    last_error: Exception | None = None
-    for profile_mode, profile_dir, clear_locks_first in _profile_dir_candidates(task_id):
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        if clear_locks_first:
-            _clear_profile_lock_files(profile_dir)
-        try:
-            log(f"Launch Chromium profile: mode={profile_mode}, dir={profile_dir}")
-            browser = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                executable_path=executable_path,
-                headless=headless,
-                viewport={"width": 1440, "height": 900},
-            )
-            return browser, profile_mode, str(profile_dir)
-        except PlaywrightError as exc:
-            last_error = exc
-            if profile_mode == "shared" and _is_profile_lock_error(exc):
-                log("Shared browser profile is busy, falling back to isolated profile")
-                continue
-            if _is_profile_lock_error(exc):
-                raise PageStateError(PAGE_PROFILE_LOCKED, str(exc)) from exc
-            raise
-    if last_error:
-        if _is_profile_lock_error(last_error):
-            raise PageStateError(PAGE_PROFILE_LOCKED, str(last_error)) from last_error
-        raise last_error
-    raise RuntimeError("Failed to launch Chromium context")
+def _launch_browser_context(playwright, task_id: int, profile: BrowserProfile):
+    try:
+        log(f"Launch Chromium profile: headless={profile.headless}, viewport={profile.viewport_width}x{profile.viewport_height}")
+        return launch_persistent_browser_context(playwright, task_id=task_id, profile=profile)
+    except PlaywrightError as exc:
+        if is_profile_lock_error(exc):
+            raise PageStateError(PAGE_PROFILE_LOCKED, str(exc)) from exc
+        raise
 
 
 def _safe_page_title(page: Page | None) -> str | None:
@@ -226,14 +180,47 @@ def _build_failure_message(exc: Exception, page: Page | None = None) -> str:
     return f"{PAGE_UNKNOWN}: {base_message}"
 
 
+def _merge_meta(*parts: dict | None) -> dict:
+    merged: dict = {}
+    for part in parts:
+        if part:
+            merged.update(part)
+    return merged
+
+
+def _runtime_meta(
+    *,
+    profile: BrowserProfile,
+    launch: BrowserLaunchResult | None = None,
+    retry_attempt: int = 0,
+) -> dict:
+    return _merge_meta(
+        profile.artifact_meta(),
+        launch.artifact_meta() if launch else None,
+        {"retry_attempt": retry_attempt},
+    )
+
+
+def _should_retry_with_fallback(error_type: str, settings: dict, retry_attempt: int) -> bool:
+    max_attempts = int(settings.get("browser_retry_max_attempts") or 0)
+    if retry_attempt >= max_attempts:
+        return False
+    if error_type == PAGE_VERIFICATION_REQUIRED:
+        return bool(settings.get("browser_retry_on_verification", True))
+    if error_type == PAGE_PROFILE_LOCKED:
+        return bool(settings.get("browser_retry_on_profile_lock", True))
+    return False
+
+
 def _looks_like_result_list(page: Page) -> bool:
     result_selectors = [
-        "text=选为去程",
-        "text=選為去程",
-        "text=往返总价",
-        "text=选择去程",
-        "text=直飞/经停",
-        "text=中转组合",
+        "text=\u9009\u62e9\u53bb\u7a0b",
+        "text=\u9009\u62e9\u8fd4\u7a0b",
+        "text=\u5f80\u8fd4\u603b\u4ef7",
+        "text=\u76f4\u98de/\u7ecf\u505c",
+        "text=\u4e2d\u8f6c\u7ec4\u5408",
+        "text=Select",
+        "text=Flight",
     ]
     for selector in result_selectors:
         try:
@@ -245,14 +232,22 @@ def _looks_like_result_list(page: Page) -> bool:
     text = _page_visible_text(page)
     if not text:
         return False
-    strong_keywords = ["选为去程", "往返总价", "选择去程", "中转组合", "最近更新时间", "直飞/经停"]
+    strong_keywords = [
+        "\u9009\u62e9\u53bb\u7a0b",
+        "\u9009\u62e9\u8fd4\u7a0b",
+        "\u5f80\u8fd4\u603b\u4ef7",
+        "\u4e2d\u8f6c\u7ec4\u5408",
+        "\u6700\u8fd1\u66f4\u65b0\u65f6\u95f4",
+        "\u76f4\u98de/\u7ecf\u505c",
+        "flight",
+    ]
     return sum(1 for keyword in strong_keywords if keyword in text) >= 2
 
 
 def _dismiss_known_result_dialogs(page: Page) -> bool:
     dismiss_pairs = [
-        ("出行提醒", "知道了"),
-        ("进藏提醒", "知道了"),
+        ("\u51fa\u884c\u63d0\u9192", "\u77e5\u9053\u4e86"),
+        ("\u6e29\u99a8\u63d0\u9192", "\u77e5\u9053\u4e86"),
     ]
     for title_text, button_text in dismiss_pairs:
         try:
@@ -273,14 +268,14 @@ def _classify_page_text(page: Page) -> str | None:
         return None
 
     login_signals = [
-        "text=账号密码登录",
-        "text=验证码登录",
-        "text=忘记密码",
-        "text=免费注册",
-        "input[placeholder*='手机号']",
-        "input[placeholder*='用户名']",
-        "input[placeholder*='邮箱']",
-        "input[placeholder*='登录密码']",
+        "text=\u8d26\u53f7\u5bc6\u7801\u767b\u5f55",
+        "text=\u9a8c\u8bc1\u7801\u767b\u5f55",
+        "text=\u5fd8\u8bb0\u5bc6\u7801",
+        "text=\u514d\u8d39\u6ce8\u518c",
+        "input[placeholder*=\"\u624b\u673a\u53f7\"]",
+        "input[placeholder*=\"\u7528\u6237\u540d\"]",
+        "input[placeholder*=\"\u90ae\u7bb1\"]",
+        "input[placeholder*=\"\u767b\u5f55\u5bc6\u7801\"]",
     ]
     matched_login_signals = 0
     for selector in login_signals:
@@ -293,7 +288,7 @@ def _classify_page_text(page: Page) -> str | None:
         return PAGE_LOGIN_REQUIRED
 
     try:
-        login_modal = page.locator("input[placeholder*='登录密码']").count() > 0
+        login_modal = page.locator('input[placeholder*=\"\u767b\u5f55\u5bc6\u7801\"]').count() > 0
     except PlaywrightError:
         login_modal = False
 
@@ -302,98 +297,31 @@ def _classify_page_text(page: Page) -> str | None:
         return PAGE_LOGIN_REQUIRED if login_modal else None
     lowered = text.lower()
     verification_keywords = [
-        "验证码",
-        "滑块",
-        "人机验证",
-        "安全验证",
-        "访问异常",
-        "网络环境异常",
-        "请完成验证",
+        "\u9a8c\u8bc1\u7801",
+        "\u6ed1\u5757",
+        "\u4eba\u673a\u9a8c\u8bc1",
+        "\u5b89\u5168\u9a8c\u8bc1",
+        "\u8bbf\u95ee\u5f02\u5e38",
+        "\u7f51\u7edc\u73af\u5883\u5f02\u5e38",
+        "\u8bf7\u5b8c\u6210\u9a8c\u8bc1",
         "verify",
         "verification",
         "risk control",
         "risk-control",
     ]
-    login_keywords = ["账号密码登录", "验证码登录", "请先登录", "登录验证", "forget password", "forgot password"]
+    login_keywords = [
+        "\u8d26\u53f7\u5bc6\u7801\u767b\u5f55",
+        "\u9a8c\u8bc1\u7801\u767b\u5f55",
+        "\u8bf7\u5148\u767b\u5f55",
+        "\u767b\u5f55\u9a8c\u8bc1",
+        "forget password",
+        "forgot password",
+    ]
     if login_modal or any(keyword.lower() in lowered for keyword in login_keywords):
         return PAGE_LOGIN_REQUIRED
     if any(keyword.lower() in lowered for keyword in verification_keywords):
         return PAGE_VERIFICATION_REQUIRED
     return None
-
-
-def wait_for_manual_continue(page: Page, message: str, task_id: int | None = None) -> None:
-    log("Manual takeover required")
-    log(message)
-    try:
-        page.bring_to_front()
-        page.evaluate(
-            """(message) => {
-                const existing = document.getElementById("flightclaw-manual-tip");
-                if (existing) existing.remove();
-                const tip = document.createElement("div");
-                tip.id = "flightclaw-manual-tip";
-                tip.innerHTML = "";
-                const text = document.createElement("div");
-                text.textContent = message;
-                const button = document.createElement("button");
-                button.type = "button";
-                button.textContent = "I have handled it, continue";
-                button.onclick = () => {
-                    window.__flightclawManualContinue = true;
-                    tip.remove();
-                };
-                Object.assign(tip.style, {
-                    position: "fixed",
-                    left: "16px",
-                    right: "16px",
-                    bottom: "16px",
-                    zIndex: "2147483647",
-                    padding: "14px 18px",
-                    background: "#fff7ed",
-                    border: "1px solid #fb923c",
-                    color: "#7c2d12",
-                    fontSize: "16px",
-                    borderRadius: "8px",
-                    boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
-                    display: "flex",
-                    gap: "12px",
-                    alignItems: "center",
-                    justifyContent: "space-between"
-                });
-                Object.assign(button.style, {
-                    border: "0",
-                    borderRadius: "6px",
-                    background: "#ea580c",
-                    color: "#fff",
-                    cursor: "pointer",
-                    padding: "8px 12px",
-                    whiteSpace: "nowrap"
-                });
-                tip.appendChild(text);
-                tip.appendChild(button);
-                window.__flightclawManualContinue = false;
-                document.body.appendChild(tip);
-            }""",
-            message,
-        )
-        deadline = time.monotonic() + MANUAL_CONTINUE_TIMEOUT_MS / 1000
-        while time.monotonic() < deadline:
-            _raise_if_cancelled(task_id)
-            try:
-                page.wait_for_function("() => window.__flightclawManualContinue === true", timeout=5_000)
-                break
-            except PlaywrightTimeoutError:
-                continue
-        else:
-            raise PlaywrightTimeoutError("Manual intervention timed out")
-        log("Manual takeover confirmed, continue")
-        return
-    except PlaywrightTimeoutError as exc:
-        raise ManualInterventionRequired(PAGE_MANUAL_TAKEOVER_TIMEOUT, "manual takeover timed out") from exc
-    except PlaywrightError:
-        pass
-    raise ManualInterventionRequired(PAGE_UNKNOWN, message)
 
 
 def _cancellable_sleep(seconds: float, task_id: int | None = None) -> None:
@@ -408,13 +336,13 @@ def _cancellable_sleep(seconds: float, task_id: int | None = None) -> None:
 
 def _sleep_before_single_task(task_id: int | None = None) -> None:
     seconds = random.uniform(3, 8)
-    log(f"低频控制：执行前等待 {seconds:.1f} 秒")
+    log(f"low-frequency control: wait {seconds:.1f}s before task")
     _cancellable_sleep(seconds, task_id)
 
 
 def sleep_between_batch_tasks() -> None:
     seconds = random.uniform(30, 90)
-    log(f"低频控制：任务间等待 {seconds:.1f} 秒")
+    log(f"low-frequency control: wait {seconds:.1f}s between tasks")
     time.sleep(seconds)
 
 
@@ -481,12 +409,12 @@ def _safe_fill(page: Page, labels: list[str], value: str, action_name: str) -> b
 
 
 def _safe_click_search(page: Page) -> bool:
-    log("点击搜索")
+    log("click search")
     candidates = [
-        page.get_by_role("button", name="搜索"),
-        page.get_by_text("搜索", exact=True),
-        page.locator("button").filter(has_text="搜索"),
-        page.locator("a").filter(has_text="搜索"),
+        page.get_by_role("button", name="鎼滅储"),
+        page.get_by_text("鎼滅储", exact=True),
+        page.locator("button").filter(has_text="鎼滅储"),
+        page.locator("a").filter(has_text="鎼滅储"),
     ]
     for locator in candidates:
         try:
@@ -553,34 +481,27 @@ def _looks_like_manual_verification(page: Page) -> bool:
 
 
 def _try_fill_and_search(page: Page, task: FlightQueryTask) -> None:
-    from_ok = _safe_fill(page, ["出发", "出发城市", "出发地"], task.from_city, "填写出发城市")
-    to_ok = _safe_fill(page, ["到达", "到达城市", "目的地"], task.to_city, "填写到达城市")
-    date_ok = _safe_fill(page, ["出发日期", "日期", "去程日期"], task.depart_date.isoformat(), "填写去程日期")
-
+    from_ok = _safe_fill(page, ["\u51fa\u53d1", "\u51fa\u53d1\u57ce\u5e02"], task.from_city, "fill departure city")
+    to_ok = _safe_fill(page, ["\u5230\u8fbe", "\u5230\u8fbe\u57ce\u5e02", "\u76ee\u7684\u5730"], task.to_city, "fill arrival city")
+    date_ok = _safe_fill(page, ["\u51fa\u53d1\u65e5\u671f", "\u65e5\u671f", "\u53bb\u7a0b\u65e5\u671f"], task.depart_date.isoformat(), "fill departure date")
     if task.trip_type == TRIP_ROUND_TRIP and task.return_date:
-        return_date_ok = _safe_fill(page, ["返程日期", "返回日期"], task.return_date.isoformat(), "填写返程日期")
+        return_date_ok = _safe_fill(page, ["\u8fd4\u7a0b\u65e5\u671f", "\u8fd4\u56de\u65e5\u671f"], task.return_date.isoformat(), "fill return date")
         if not return_date_ok:
-            log("返程日期填写失败，尝试切换往返模式")
             _try_switch_to_roundtrip(page)
-            _safe_fill(page, ["返程日期", "返回日期"], task.return_date.isoformat(), "填写返程日期(重试)")
-
+            _safe_fill(page, ["\u8fd4\u7a0b\u65e5\u671f", "\u8fd4\u56de\u65e5\u671f"], task.return_date.isoformat(), "fill return date retry")
     if not (from_ok and to_ok and date_ok):
-        wait_for_manual_continue(
-            page,
-            "自动填写失败或页面结构已变化，请人工处理登录/验证码/搜索表单后再继续。",
-        )
-
+        _raise_page_error(PAGE_STRUCTURE_CHANGED, "automatic form fill failed or page structure changed", page)
     if not _safe_click_search(page):
-        wait_for_manual_continue(page, "搜索按钮找不到，请人工确认页面结构。")
+        _raise_page_error(PAGE_STRUCTURE_CHANGED, "search button not found", page)
 
 
 def _try_switch_to_roundtrip(page: Page) -> None:
-    log("尝试切换到往返模式")
+    log("try switching to round-trip mode")
     candidates = [
-        page.get_by_text("往返", exact=True),
-        page.get_by_text("往返"),
-        page.get_by_role("tab", name="往返"),
-        page.get_by_role("radio", name="往返"),
+        page.get_by_text("\u5f80\u8fd4", exact=True),
+        page.get_by_text("\u5f80\u8fd4"),
+        page.get_by_role("tab", name="\u5f80\u8fd4"),
+        page.get_by_role("radio", name="\u5f80\u8fd4"),
         page.locator("[data-tab='roundtrip']"),
         page.locator("[data-tab='round']"),
     ]
@@ -590,21 +511,15 @@ def _try_switch_to_roundtrip(page: Page) -> None:
                 continue
             locator.first.click(timeout=5_000)
             page.wait_for_timeout(1500)
-            log("已切换到往返模式")
+            log("switched to round-trip mode")
             return
         except PlaywrightError:
             continue
-    log("无法自动切换到往返模式，将继续尝试填写返程日期")
+    log("unable to switch to round-trip mode automatically")
 
 
-def _wait_for_result_or_manual(
-    page: Page,
-    task_id: int | None = None,
-    *,
-    headless: bool,
-    manual_takeover_enabled: bool,
-) -> None:
-    log("等待结果")
+def _wait_for_result_or_fail(page: Page, task_id: int | None = None) -> None:
+    log("waiting for result page")
     deadline = time.monotonic() + RESULT_TIMEOUT_MS / 1000
     while True:
         _raise_if_cancelled(task_id)
@@ -617,36 +532,24 @@ def _wait_for_result_or_manual(
                 break
             if time.monotonic() >= deadline:
                 if _looks_like_manual_verification(page):
-                    if headless or not manual_takeover_enabled:
-                        _raise_page_error(PAGE_VERIFICATION_REQUIRED, "verification or risk-control page detected", page)
-                    wait_for_manual_continue(page, "检测到登录、验证码或风控页面，请人工处理。", task_id)
-                    return
-                if headless or not manual_takeover_enabled:
-                    _raise_page_error(PAGE_LOAD_TIMEOUT, "result page load timed out", page)
-                wait_for_manual_continue(page, "等待结果超时，请人工确认页面是否已经完成搜索。", task_id)
-                return
+                    _raise_page_error(PAGE_VERIFICATION_REQUIRED, "verification or risk-control page detected", page)
+                _raise_page_error(PAGE_LOAD_TIMEOUT, "result page load timed out", page)
 
     _dismiss_known_result_dialogs(page)
     page_error_type = _classify_page_text(page)
     if page_error_type == PAGE_VERIFICATION_REQUIRED:
-        if headless or not manual_takeover_enabled:
-            _raise_page_error(page_error_type, "verification or risk-control page detected", page)
-        wait_for_manual_continue(page, "检测到登录、验证码或风控提示，请人工处理。", task_id)
-        return
+        _raise_page_error(page_error_type, "verification or risk-control page detected", page)
     if page_error_type == PAGE_LOGIN_REQUIRED:
-        if headless or not manual_takeover_enabled:
-            _raise_page_error(page_error_type, "login page detected", page)
-        wait_for_manual_continue(page, "检测到登录页面，请人工处理。", task_id)
-
+        _raise_page_error(page_error_type, "login page detected", page)
 
 def _click_outbound_by_rank(page: Page, rank: int) -> None:
     candidates = [
-        page.get_by_text("选为去程"),
-        page.get_by_text("選為去程"),
-        page.get_by_text("订票"),
-        page.get_by_text("訂票"),
-        page.locator("button").filter(has_text="选为去程"),
-        page.locator("button").filter(has_text="订票"),
+        page.get_by_text("閫変负鍘荤▼"),
+        page.get_by_text("閬哥偤鍘荤▼"),
+        page.get_by_text("璁㈢エ"),
+        page.get_by_text("瑷傜エ"),
+        page.locator("button").filter(has_text="閫変负鍘荤▼"),
+        page.locator("button").filter(has_text="璁㈢エ"),
     ]
     for locator in candidates:
         try:
@@ -705,7 +608,47 @@ def _page_visible_text(page: Page) -> str:
     return normalize_text(text)
 
 
-def _save_snapshot(page: Page, task_id: int, failed: bool = False, label: str | None = None) -> tuple[str | None, str | None]:
+def _artifact_stage(label: str | None, failed: bool = False) -> str:
+    base = label or "result"
+    return f"{base}_failed" if failed else base
+
+
+def _record_artifact(
+    task_id: int,
+    *,
+    stage: str,
+    artifact_type: str,
+    path: str | None,
+    label: str | None = None,
+    meta: dict | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
+) -> None:
+    if not path:
+        return
+    try:
+        with SessionLocal() as db:
+            create_task_artifact(
+                db,
+                task_id=task_id,
+                stage=stage,
+                artifact_type=artifact_type,
+                path=path,
+                label=label,
+                meta=_merge_meta(meta, profile.artifact_meta() if profile else None, runtime_meta),
+            )
+    except Exception as exc:
+        log(f"artifact record failed: {exc}")
+
+
+def _save_snapshot(
+    page: Page,
+    task_id: int,
+    failed: bool = False,
+    label: str | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
+) -> tuple[str | None, str | None]:
     suffix = "_failed" if failed else ""
     middle = f"_{label}" if label else ""
     screenshot_path = DATA_DIR / "screenshots" / f"task_{task_id}{middle}{suffix}.png"
@@ -716,18 +659,38 @@ def _save_snapshot(page: Page, task_id: int, failed: bool = False, label: str | 
     _load_more_results_for_snapshot(page)
 
     try:
-        log("保存截图")
+        log("save screenshot")
         page.screenshot(path=str(screenshot_path), full_page=True, timeout=30_000)
         saved_screenshot = str(screenshot_path)
+        _record_artifact(
+            task_id,
+            stage=_artifact_stage(label, failed),
+            artifact_type=ARTIFACT_SCREENSHOT,
+            path=saved_screenshot,
+            label=label,
+            meta={"failed": failed},
+            profile=profile,
+            runtime_meta=runtime_meta,
+        )
     except PlaywrightError as exc:
-        log(f"截图保存失败: {exc}")
+        log(f"screenshot save failed: {exc}")
 
     try:
-        log("保存可见文本")
+        log("save visible text")
         text_path.write_text(_page_visible_text(page), encoding="utf-8")
         saved_text = str(text_path)
+        _record_artifact(
+            task_id,
+            stage=_artifact_stage(label, failed),
+            artifact_type=ARTIFACT_TEXT,
+            path=saved_text,
+            label=label,
+            meta={"failed": failed},
+            profile=profile,
+            runtime_meta=runtime_meta,
+        )
     except Exception as exc:
-        log(f"可见文本保存失败: {exc}")
+        log(f"visible text save failed: {exc}")
 
     return saved_screenshot, saved_text
 
@@ -739,13 +702,22 @@ def _try_capture_failure_artifacts(
     label: str | None = None,
     current_screenshot_path: str | None = None,
     current_text_path: str | None = None,
+    profile: BrowserProfile | None = None,
+    runtime_meta: dict | None = None,
 ) -> tuple[str | None, str | None]:
     if not page:
         return current_screenshot_path, current_text_path
     try:
-        screenshot_path, text_path = _save_snapshot(page, task_id, failed=True, label=label)
+        screenshot_path, text_path = _save_snapshot(
+            page,
+            task_id,
+            failed=True,
+            label=label,
+            profile=profile,
+            runtime_meta=runtime_meta,
+        )
     except Exception as exc:
-        log(f"保存失败现场时发生异常: {exc}")
+        log(f"娣囨繂鐡ㄦ径杈Е閻滄澘婧€閺冭泛褰傞悽鐔风磽鐢? {exc}")
         return current_screenshot_path, current_text_path
     return screenshot_path or current_screenshot_path, text_path or current_text_path
 
@@ -785,9 +757,8 @@ def _expand_roundtrip_returns(
     page: Page,
     task_id: int,
     outbound_url: str,
-    *,
-    headless: bool,
-    manual_takeover_enabled: bool,
+    profile: BrowserProfile,
+    runtime_meta: dict | None = None,
 ) -> dict:
     total_returns = 0
     total_plans = 0
@@ -810,20 +781,16 @@ def _expand_roundtrip_returns(
             with SessionLocal() as db:
                 mark_outbound_status(db, outbound.id, RETURN_EXPANDING)
             page.goto(outbound_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
-            _wait_for_result_or_manual(
-                page,
-                task_id,
-                headless=headless,
-                manual_takeover_enabled=manual_takeover_enabled,
-            )
+            _wait_for_result_or_fail(page, task_id)
             _click_outbound_by_rank(page, rank)
-            _wait_for_result_or_manual(
+            _wait_for_result_or_fail(page, task_id)
+            screenshot_path, text_path = _save_snapshot(
                 page,
                 task_id,
-                headless=headless,
-                manual_takeover_enabled=manual_takeover_enabled,
+                label=f"outbound_rank_{rank}_return",
+                profile=profile,
+                runtime_meta=runtime_meta,
             )
-            screenshot_path, text_path = _save_snapshot(page, task_id, label=f"outbound_rank_{rank}_return")
             if not text_path:
                 raise PageStateError(PAGE_STRUCTURE_CHANGED, f"return snapshot text was not saved for outbound rank {rank}")
             with SessionLocal() as db:
@@ -840,7 +807,14 @@ def _expand_roundtrip_returns(
             failed += 1
             failure_message = _build_failure_message(exc, page)
             if page:
-                _save_snapshot(page, task_id, failed=True, label=f"outbound_rank_{rank}_return")
+                _save_snapshot(
+                    page,
+                    task_id,
+                    failed=True,
+                    label=f"outbound_rank_{rank}_return",
+                    profile=profile,
+                    runtime_meta=runtime_meta,
+                )
             with SessionLocal() as db:
                 mark_outbound_status(db, outbound.id, RETURN_EXPAND_FAILED)
             outbound_errors.append(
@@ -861,6 +835,135 @@ def _expand_roundtrip_returns(
     }
 
 
+def _run_ctrip_attempt(
+    playwright,
+    *,
+    task_id: int,
+    task_data: dict,
+    retry_attempt: int,
+    browser_profile_settings: dict,
+) -> dict:
+    page = None
+    browser = None
+    launch: BrowserLaunchResult | None = None
+    profile = BrowserProfile.from_settings(
+        headless=get_headless(),
+        task_id=task_id,
+        monitor_id=task_data["monitor_id"],
+        route_key=task_data["route_key"],
+        date_bucket=task_data["date_bucket"],
+        penalty_index=task_data["penalty_index"],
+    )
+    if retry_attempt > 0:
+        profile.session_mode = str(browser_profile_settings.get("browser_fallback_mode") or "isolated_ephemeral")
+    screenshot_path = None
+    text_path = None
+    xhr_capture: XhrCapture | None = None
+    xhr_path = None
+    roundtrip_parsed_count = None
+    roundtrip_expand_result = None
+    try:
+        log(f"browser mode: {'headless' if profile.headless else 'headed'}")
+        launch = _launch_browser_context(playwright, task_id, profile)
+        browser = launch.context
+        runtime_meta = _runtime_meta(profile=profile, launch=launch, retry_attempt=retry_attempt)
+        log(
+            "Browser context started: "
+            f"session_mode={launch.session_mode}, dir={launch.profile_dir}, "
+            f"fingerprint={profile.fingerprint_name}, retry_attempt={retry_attempt}"
+        )
+        page = browser.pages[0] if browser.pages else browser.new_page()
+        page.set_default_timeout(30_000)
+        xhr_capture = XhrCapture(
+            task_id=task_id,
+            stage="ctrip_result",
+            enabled=profile.capture_xhr_enabled,
+            pattern=profile.capture_xhr_pattern,
+            artifact_meta=runtime_meta,
+        )
+        xhr_capture.attach(page)
+        try:
+            target_url = (
+                _build_roundtrip_list_url(type("TaskStub", (), task_data))
+                if task_data["trip_type"] == TRIP_ROUND_TRIP
+                else _build_list_url(type("TaskStub", (), task_data))
+            )
+            log(f"open result page: {target_url}")
+            try:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+            except PlaywrightTimeoutError as exc:
+                _raise_page_error(PAGE_LOAD_TIMEOUT, f"page navigation timed out: {exc}", page)
+
+            _wait_for_result_or_fail(page, task_id)
+            _validate_result_context(page, type("TaskStub", (), task_data), target_url)
+            snapshot_label = "roundtrip_outbound" if task_data["trip_type"] == TRIP_ROUND_TRIP else None
+            screenshot_path, text_path = _save_snapshot(
+                page,
+                task_id,
+                label=snapshot_label,
+                profile=profile,
+                runtime_meta=runtime_meta,
+            )
+            if task_data["trip_type"] == TRIP_ROUND_TRIP:
+                with SessionLocal() as db:
+                    task = db.get(FlightQueryTask, task_id)
+                    if not task:
+                        raise ValueError(f"Query task not found during round-trip parse: {task_id}")
+                    task.screenshot_path = screenshot_path
+                    task.text_path = text_path
+                    task.html_path = None
+                    db.commit()
+                    parsed = parse_roundtrip_outbounds_for_task(db, task)
+                    roundtrip_parsed_count = parsed["parsed_count"]
+                    if roundtrip_parsed_count <= 0:
+                        _raise_page_error(PAGE_PARSE_ZERO_RESULT, "no outbound rows parsed", page)
+                    strategy = _strategy_from_task(task)
+                if strategy.get("roundtrip_expand_return") and roundtrip_parsed_count > 0:
+                    roundtrip_expand_result = _expand_roundtrip_returns(
+                        page,
+                        task_id,
+                        target_url,
+                        profile,
+                        runtime_meta,
+                    )
+        except Exception:
+            if xhr_capture:
+                xhr_path = xhr_capture.finalize()
+            screenshot_path, text_path = _try_capture_failure_artifacts(
+                page,
+                task_id,
+                current_screenshot_path=screenshot_path,
+                current_text_path=text_path,
+                profile=profile,
+                runtime_meta=runtime_meta,
+            )
+            raise
+        if xhr_capture:
+            xhr_path = xhr_capture.finalize()
+        return {
+            "profile": profile,
+            "launch": launch,
+            "screenshot_path": screenshot_path,
+            "text_path": text_path,
+            "xhr_path": xhr_path,
+            "roundtrip_parsed_count": roundtrip_parsed_count,
+            "roundtrip_expand_result": roundtrip_expand_result,
+            "page": page,
+        }
+    except Exception:
+        if xhr_capture and not xhr_path:
+            xhr_path = xhr_capture.finalize()
+        raise
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except PlaywrightError:
+                pass
+        if launch:
+            launch.cleanup()
+
+
 def run_ctrip_task(task_id: int) -> dict:
     _prepare_playwright_event_loop()
     browser_lock_acquired = False
@@ -870,13 +973,11 @@ def run_ctrip_task(task_id: int) -> dict:
     except TaskCancelled:
         _mark_cancelled(task_id)
         return {"task_id": task_id, "status": STATUS_CANCELLED, "message": "Task cancelled before browser start"}
-    page = None
-    browser = None
-    roundtrip_parsed_count = None
-    roundtrip_expand_result = None
     final_status = STATUS_SUCCESS
     screenshot_path = None
     text_path = None
+    xhr_path = None
+    task_data: dict | None = None
     try:
         with SessionLocal() as db:
             task = db.get(FlightQueryTask, task_id)
@@ -888,7 +989,7 @@ def run_ctrip_task(task_id: int) -> dict:
                     "status": task.status,
                     "message": "Task status is not PENDING or FAILED; skipped.",
                 }
-            log(f"开始执行任务 task_id={task.id}, {task.from_city}->{task.to_city}, {task.depart_date}")
+            log(f"start task: task_id={task.id}, {task.from_city}->{task.to_city}, {task.depart_date}")
             task.status = STATUS_RUNNING
             task.error_message = None
             task.start_time = datetime.now()
@@ -896,84 +997,62 @@ def run_ctrip_task(task_id: int) -> dict:
             db.commit()
             task_data = {
                 "id": task.id,
+                "platform": task.platform,
                 "trip_type": task.trip_type,
                 "from_city": task.from_city,
                 "from_airports": task.monitor.from_airports if task.monitor else None,
                 "to_city": task.to_city,
                 "to_airports": task.monitor.to_airports if task.monitor else None,
+                "monitor_id": task.monitor_id,
+                "route_key": f"{task.platform}:{task.trip_type}:{task.from_city}:{task.to_city}",
+                "date_bucket": datetime.now().date().isoformat(),
                 "depart_date": task.depart_date,
                 "return_date": task.return_date,
                 "batch_no": task.batch_no,
-                "manual_takeover_enabled": bool(task.monitor.manual_takeover_enabled) if task.monitor else True,
             }
+            task_data["penalty_index"] = get_penalty_index(
+                task.platform,
+                task.monitor_id,
+                task_data["date_bucket"],
+            )
 
         _sleep_before_single_task(task_id)
+        browser_profile_settings = get_browser_profile_settings()
+        last_error_message: str | None = None
+        last_error_type: str | None = None
         with sync_playwright() as p:
-            headless = get_headless()
-            log(f"浏览器模式: {'无头' if headless else '有头'}")
-            executable_path = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH") or None
-            browser, profile_mode, profile_dir = _launch_browser_context(p, task_id, headless, executable_path)
-            log(f"Browser context started: mode={profile_mode}, dir={profile_dir}")
-            page = browser.pages[0] if browser.pages else browser.new_page()
-            page.set_default_timeout(30_000)
-            try:
+            attempt_task_data = copy.deepcopy(task_data)
+            attempt_result = None
+            for retry_attempt in range(int(browser_profile_settings.get("browser_retry_max_attempts") or 0) + 1):
                 try:
-                    target_url = (
-                        _build_roundtrip_list_url(type("TaskStub", (), task_data))
-                        if task_data["trip_type"] == TRIP_ROUND_TRIP
-                        else _build_list_url(type("TaskStub", (), task_data))
+                    attempt_result = _run_ctrip_attempt(
+                        p,
+                        task_id=task_id,
+                        task_data=attempt_task_data,
+                        retry_attempt=retry_attempt,
+                        browser_profile_settings=browser_profile_settings,
                     )
-                    log(f"打开结果页 {target_url}")
-                    page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
-                except PlaywrightTimeoutError as exc:
-                    _raise_page_error(PAGE_LOAD_TIMEOUT, f"page navigation timed out: {exc}", page)
-
-                _wait_for_result_or_manual(
-                    page,
-                    task_id,
-                    headless=headless,
-                    manual_takeover_enabled=bool(task_data["manual_takeover_enabled"]),
-                )
-                _validate_result_context(page, type("TaskStub", (), task_data), target_url)
-                snapshot_label = "roundtrip_outbound" if task_data["trip_type"] == TRIP_ROUND_TRIP else None
-                screenshot_path, text_path = _save_snapshot(page, task_id, label=snapshot_label)
-                if task_data["trip_type"] == TRIP_ROUND_TRIP:
-                    with SessionLocal() as db:
-                        task = db.get(FlightQueryTask, task_id)
-                        if not task:
-                            raise ValueError(f"Query task not found during round-trip parse: {task_id}")
-                        task.screenshot_path = screenshot_path
-                        task.text_path = text_path
-                        task.html_path = None
-                        db.commit()
-                        parsed = parse_roundtrip_outbounds_for_task(db, task)
-                        roundtrip_parsed_count = parsed["parsed_count"]
-                        if roundtrip_parsed_count <= 0:
-                            _raise_page_error(PAGE_PARSE_ZERO_RESULT, "no outbound rows parsed", page)
-                        strategy = _strategy_from_task(task)
-                    if strategy.get("roundtrip_expand_return") and roundtrip_parsed_count > 0:
-                        roundtrip_expand_result = _expand_roundtrip_returns(
-                            page,
-                            task_id,
-                            target_url,
-                            headless=headless,
-                            manual_takeover_enabled=bool(task_data["manual_takeover_enabled"]),
-                        )
-            except Exception:
-                screenshot_path, text_path = _try_capture_failure_artifacts(
-                    page,
-                    task_id,
-                    current_screenshot_path=screenshot_path,
-                    current_text_path=text_path,
-                )
-                raise
-            finally:
-                if browser:
-                    try:
-                        browser.close()
-                    except PlaywrightError:
-                        pass
-                    browser = None
+                    screenshot_path = attempt_result["screenshot_path"]
+                    text_path = attempt_result["text_path"]
+                    xhr_path = attempt_result["xhr_path"]
+                    roundtrip_parsed_count = attempt_result["roundtrip_parsed_count"]
+                    roundtrip_expand_result = attempt_result["roundtrip_expand_result"]
+                    break
+                except Exception as exc:
+                    error_message = _build_failure_message(exc)
+                    error_type = _error_type_from_message(error_message)
+                    last_error_message = error_message
+                    last_error_type = error_type
+                    if not _should_retry_with_fallback(error_type, browser_profile_settings, retry_attempt):
+                        raise
+                    attempt_task_data["penalty_index"] = int(attempt_task_data.get("penalty_index") or 0) + 1
+                    log(
+                        "Retry with fallback browser session: "
+                        f"error_type={error_type}, retry_attempt={retry_attempt + 1}, "
+                        f"penalty_index={attempt_task_data['penalty_index']}"
+                    )
+            if attempt_result is None and last_error_message:
+                raise RuntimeError(last_error_message)
 
         with SessionLocal() as db:
             task = db.get(FlightQueryTask, task_id)
@@ -1002,35 +1081,42 @@ def run_ctrip_task(task_id: int) -> dict:
             final_status = task.status
             db.commit()
             refresh_batch_counts(db, batch_no)
-        log("任务成功")
+        browser_profile_settings = get_browser_profile_settings()
+        record_fingerprint_result(
+            platform=task_data["platform"],
+            monitor_id=task_data["monitor_id"],
+            date_bucket=task_data["date_bucket"],
+            error_type=None,
+            threshold=int(browser_profile_settings.get("fingerprint_verification_switch_threshold") or 2),
+        )
+        log("task succeeded")
         return {
             "task_id": task_id,
             "status": final_status,
             "screenshot_path": screenshot_path,
             "text_path": text_path,
+            "xhr_path": xhr_path,
         }
     except Exception as exc:
         if isinstance(exc, TaskCancelled):
-            log("任务已取消")
-            if browser:
-                try:
-                    browser.close()
-                except PlaywrightError:
-                    pass
+            log("task cancelled")
             _mark_cancelled(task_id)
             return {
                 "task_id": task_id,
                 "status": STATUS_CANCELLED,
                 "message": "Task cancelled",
             }
-        error_message = _build_failure_message(exc, page)
-        log(f"任务失败: {error_message}")
-        if browser:
-            try:
-                browser.close()
-            except PlaywrightError:
-                pass
+        error_message = _build_failure_message(exc)
+        log(f"task failed: {error_message}")
         _mark_failed(task_id, error_message, screenshot_path, text_path)
+        browser_profile_settings = get_browser_profile_settings()
+        record_fingerprint_result(
+            platform=task_data["platform"] if task_data else "ctrip",
+            monitor_id=task_data["monitor_id"] if task_data else None,
+            date_bucket=task_data["date_bucket"] if task_data else None,
+            error_type=_error_type_from_message(error_message),
+            threshold=int(browser_profile_settings.get("fingerprint_verification_switch_threshold") or 2),
+        )
         return {
             "task_id": task_id,
             "status": STATUS_FAILED,
@@ -1038,8 +1124,7 @@ def run_ctrip_task(task_id: int) -> dict:
             "error_message": error_message,
             "screenshot_path": screenshot_path,
             "text_path": text_path,
-            "page_url": _safe_page_url(page),
-            "page_title": _safe_page_title(page),
+            "xhr_path": xhr_path,
         }
     finally:
         if browser_lock_acquired and _browser_lock.locked():

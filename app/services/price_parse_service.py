@@ -1,17 +1,15 @@
 import hashlib
 import json
 from datetime import datetime
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import PLATFORM_CTRIP, STATUS_FAILED, STATUS_PARTIAL, STATUS_SUCCESS
-from app.constants import QUERY_DIRECT, QUERY_TRANSFER
+from app.constants import PLATFORM_CTRIP, QUERY_DIRECT, QUERY_TRANSFER, STATUS_FAILED, STATUS_PARTIAL, STATUS_SUCCESS
 from app.db import SessionLocal
 from app.models import FlightPriceRaw, FlightQueryTask
-from app.parsers.ctrip_parser import html_to_visible_text, parse_ctrip_text
+from app.services.parser_pipeline import parse_ctrip_task_items
 
 
 def _hash_key(
@@ -45,27 +43,6 @@ def _mark_task_parse(
     db.commit()
 
 
-def _load_visible_text(task: FlightQueryTask) -> str:
-    if task.text_path:
-        path = Path(task.text_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Text snapshot file not found: {path}")
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if not text.strip():
-            raise ValueError("Text snapshot file is empty")
-        return text
-
-    if not task.html_path:
-        raise ValueError("Text snapshot path is empty")
-    path = Path(task.html_path)
-    if not path.exists():
-        raise FileNotFoundError(f"HTML file not found: {path}")
-    html = path.read_text(encoding="utf-8", errors="replace")
-    if not html.strip():
-        raise ValueError("HTML file is empty")
-    return html_to_visible_text(html)
-
-
 def _parsed_query_type(item) -> str:
     return QUERY_TRANSFER if (item.transfer_count or 0) > 0 else QUERY_DIRECT
 
@@ -88,24 +65,18 @@ def parse_task_price(task_id: int) -> dict:
 
         warnings: list[str] = []
         try:
-            visible_text = _load_visible_text(task)
+            pipeline_result = parse_ctrip_task_items(db, task)
+            warnings.extend(pipeline_result.warnings)
         except Exception as exc:
             _mark_task_parse(db, task, STATUS_FAILED, str(exc))
             return {"task_id": task_id, "parsed_count": 0, "failed_count": 1, "warnings": [str(exc)]}
-
-        if not visible_text:
-            message = "No visible text found in snapshot"
-            _mark_task_parse(db, task, STATUS_FAILED, message)
-            return {"task_id": task_id, "parsed_count": 0, "failed_count": 1, "warnings": [message]}
-        if "验证码" in visible_text or "人机验证" in visible_text or "安全验证" in visible_text:
-            warnings.append("Snapshot may be a verification page, not a result page")
 
         if task.platform != PLATFORM_CTRIP:
             message = f"Unsupported platform: {task.platform}"
             _mark_task_parse(db, task, STATUS_FAILED, message)
             return {"task_id": task_id, "parsed_count": 0, "failed_count": 1, "warnings": [message]}
 
-        items = parse_ctrip_text(visible_text)
+        items = pipeline_result.items
         if not items:
             message = "No price items found"
             _mark_task_parse(db, task, STATUS_FAILED, message)
@@ -121,9 +92,7 @@ def parse_task_price(task_id: int) -> dict:
             missing_fields = _missing_required_fields(item)
             if missing_fields:
                 skipped_incomplete_count += 1
-                warnings.append(
-                    f"Skipped incomplete price {item.price}: missing {', '.join(missing_fields)}"
-                )
+                warnings.append(f"Skipped incomplete price {item.price}: missing {', '.join(missing_fields)}")
                 continue
             unique_hash = _hash_key(task, item.flight_no, item.depart_time, item.arrive_time, item.price)
             existing = db.scalar(select(FlightPriceRaw).where(FlightPriceRaw.unique_hash == unique_hash))

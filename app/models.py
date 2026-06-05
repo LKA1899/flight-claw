@@ -74,7 +74,6 @@ class FlightMonitor(Base, TimestampMixin):
     roundtrip_skip_expand_over_budget: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     continue_on_expand_failed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     save_step_snapshot: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    manual_takeover_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(100))
     schedule_timezone: Mapped[str] = mapped_column(String(100), default="Asia/Shanghai", nullable=False)
@@ -212,6 +211,24 @@ class FlightQueryTask(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
 
     monitor: Mapped[FlightMonitor] = relationship()
+
+
+class FlightTaskArtifact(Base):
+    __tablename__ = "flight_task_artifact"
+    __table_args__ = (
+        Index("ix_task_artifact_task_stage_type", "task_id", "stage", "artifact_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("flight_query_task.id"), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(80), nullable=False)
+    artifact_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(120))
+    meta_json: Mapped[str | None] = mapped_column(Text)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+
+    task: Mapped[FlightQueryTask] = relationship()
 
 
 class FlightScan(Base):

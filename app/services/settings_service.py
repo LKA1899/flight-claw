@@ -9,6 +9,27 @@ DEFAULTS = {
     "headless": False,
     "scan_interval_min_seconds": 30,
     "scan_interval_max_seconds": 90,
+    "browser_profile": {
+        "fingerprint_pool_enabled": True,
+        "fingerprint_mode": "per_monitor_daily",
+        "fingerprint_profile_strategy": "pool",
+        "fingerprint_verification_switch_threshold": 2,
+        "browser_session_mode": "persistent",
+        "browser_fallback_mode": "isolated_ephemeral",
+        "browser_retry_on_verification": True,
+        "browser_retry_on_profile_lock": True,
+        "browser_retry_max_attempts": 1,
+        "locale": "zh-CN",
+        "timezone_id": "Asia/Shanghai",
+        "viewport_width": 1440,
+        "viewport_height": 900,
+        "user_agent": "",
+        "extra_headers": {},
+        "block_resource_types": ["font", "media"],
+        "blocked_domains": [],
+        "capture_xhr_enabled": True,
+        "capture_xhr_pattern": "flight|search|price|list|ota|batch",
+    },
 }
 
 SCAN_INTERVAL_MIN_ALLOWED = 5
@@ -47,6 +68,15 @@ def get_scan_interval_range() -> tuple[int, int]:
     if minimum > maximum:
         minimum = maximum
     return minimum, maximum
+
+
+def get_browser_profile_settings() -> dict:
+    settings = load_settings()
+    profile = dict(DEFAULTS["browser_profile"])
+    custom = settings.get("browser_profile")
+    if isinstance(custom, dict):
+        profile.update(custom)
+    return profile
 
 
 def _validate_settings(data: dict) -> None:

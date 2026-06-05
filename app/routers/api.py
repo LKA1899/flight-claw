@@ -91,7 +91,6 @@ class MonitorPayload(BaseModel):
     roundtrip_skip_expand_over_budget: bool = False
     continue_on_expand_failed: bool = True
     save_step_snapshot: bool = True
-    manual_takeover_enabled: bool = True
     enabled: bool = True
     remark: str | None = None
 
@@ -274,7 +273,6 @@ def monitor_dict(monitor: FlightMonitor, date_count: int | None = None, enabled_
         "roundtrip_skip_expand_over_budget": monitor.roundtrip_skip_expand_over_budget,
         "continue_on_expand_failed": monitor.continue_on_expand_failed,
         "save_step_snapshot": monitor.save_step_snapshot,
-        "manual_takeover_enabled": monitor.manual_takeover_enabled,
         "schedule_enabled": monitor.schedule_enabled,
         "schedule_cron": monitor.schedule_cron,
         "schedule_timezone": monitor.schedule_timezone,
@@ -1500,7 +1498,6 @@ def get_settings():
                 "scan_interval_max_seconds": interval_max_seconds,
                 "scan_interval_min_allowed": SCAN_INTERVAL_MIN_ALLOWED,
                 "scan_interval_max_allowed": SCAN_INTERVAL_MAX_ALLOWED,
-                "manual_takeover_enabled": True,
             },
             "storage": {
                 "sqlite_path": str(DATA_DIR / "flight_claw.db"),

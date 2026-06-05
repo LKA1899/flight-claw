@@ -10,6 +10,7 @@ DATA_DIR.mkdir(exist_ok=True)
 (DATA_DIR / "screenshots").mkdir(exist_ok=True)
 (DATA_DIR / "text").mkdir(exist_ok=True)
 (DATA_DIR / "html").mkdir(exist_ok=True)
+(DATA_DIR / "xhr").mkdir(exist_ok=True)
 (DATA_DIR / "browser_profile" / "ctrip").mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DATA_DIR / 'flight_claw.db'}"
@@ -60,7 +61,6 @@ def ensure_runtime_schema() -> None:
         "roundtrip_skip_expand_over_budget": "BOOLEAN DEFAULT 0 NOT NULL",
         "continue_on_expand_failed": "BOOLEAN DEFAULT 1 NOT NULL",
         "save_step_snapshot": "BOOLEAN DEFAULT 1 NOT NULL",
-        "manual_takeover_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
         "schedule_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
         "schedule_cron": "VARCHAR(100)",
         "schedule_timezone": "VARCHAR(100) DEFAULT 'Asia/Shanghai' NOT NULL",
@@ -167,6 +167,37 @@ def ensure_runtime_schema() -> None:
 
         _ensure_monitor_limits_nullable(conn)
         _ensure_oneway_default_strategy(conn)
+        _ensure_task_artifact_table(conn)
+
+
+def _ensure_task_artifact_table(conn) -> None:
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS flight_task_artifact (
+            id INTEGER NOT NULL PRIMARY KEY,
+            task_id INTEGER NOT NULL,
+            stage VARCHAR(80) NOT NULL,
+            artifact_type VARCHAR(30) NOT NULL,
+            path VARCHAR(500) NOT NULL,
+            label VARCHAR(120),
+            meta_json TEXT,
+            create_time DATETIME NOT NULL,
+            FOREIGN KEY(task_id) REFERENCES flight_query_task (id)
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE INDEX IF NOT EXISTS ix_flight_task_artifact_task_id
+        ON flight_task_artifact (task_id)
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE INDEX IF NOT EXISTS ix_task_artifact_task_stage_type
+        ON flight_task_artifact (task_id, stage, artifact_type)
+        """
+    )
 
 
 def _ensure_monitor_date_indexes(conn) -> None:
@@ -257,7 +288,6 @@ def _ensure_monitor_limits_nullable(conn) -> None:
             roundtrip_skip_expand_over_budget BOOLEAN NOT NULL DEFAULT 0,
             continue_on_expand_failed BOOLEAN NOT NULL DEFAULT 1,
             save_step_snapshot BOOLEAN NOT NULL DEFAULT 1,
-            manual_takeover_enabled BOOLEAN NOT NULL DEFAULT 1,
             schedule_enabled BOOLEAN NOT NULL DEFAULT 0,
             schedule_cron VARCHAR(100),
             schedule_timezone VARCHAR(100) NOT NULL DEFAULT 'Asia/Shanghai',
@@ -282,7 +312,7 @@ def _ensure_monitor_limits_nullable(conn) -> None:
             roundtrip_expand_return, roundtrip_outbound_expand_mode, roundtrip_expand_top_n,
             roundtrip_expand_ranks, roundtrip_return_fetch_limit, roundtrip_return_sort_strategy,
             roundtrip_save_all_outbounds, roundtrip_expand_only_priced, roundtrip_skip_expand_over_budget,
-            continue_on_expand_failed, save_step_snapshot, manual_takeover_enabled,
+            continue_on_expand_failed, save_step_snapshot,
             schedule_enabled, schedule_cron, schedule_timezone, schedule_remark,
             last_scan_id, last_scan_time, last_scan_status, next_scan_time,
             enabled, remark, create_time, update_time
@@ -294,7 +324,7 @@ def _ensure_monitor_limits_nullable(conn) -> None:
             roundtrip_expand_return, roundtrip_outbound_expand_mode, roundtrip_expand_top_n,
             roundtrip_expand_ranks, roundtrip_return_fetch_limit, roundtrip_return_sort_strategy,
             roundtrip_save_all_outbounds, roundtrip_expand_only_priced, roundtrip_skip_expand_over_budget,
-            continue_on_expand_failed, save_step_snapshot, manual_takeover_enabled,
+            continue_on_expand_failed, save_step_snapshot,
             schedule_enabled, schedule_cron, schedule_timezone, schedule_remark,
             last_scan_id, last_scan_time, last_scan_status, next_scan_time,
             enabled, remark, create_time, update_time

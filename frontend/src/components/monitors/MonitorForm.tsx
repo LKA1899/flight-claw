@@ -37,7 +37,6 @@ const initial: MonitorPayload = {
   roundtrip_skip_expand_over_budget: false,
   continue_on_expand_failed: true,
   save_step_snapshot: true,
-  manual_takeover_enabled: true,
   enabled: true,
   remark: "",
 };

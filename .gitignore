@@ -13,6 +13,7 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/settings.json
+data/fingerprint_state.json
 data/screenshots/
 data/html/
 data/text/
