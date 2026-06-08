@@ -282,6 +282,7 @@ def generate_plans_for_batch(batch_no: str) -> dict:
             db.scalars(
                 select(FlightPriceRaw)
                 .where(FlightPriceRaw.batch_no == batch_no)
+                .where(FlightPriceRaw.trip_type == TRIP_ONE_WAY)
                 .order_by(FlightPriceRaw.monitor_id, FlightPriceRaw.depart_date, FlightPriceRaw.price.asc())
             )
         )
@@ -291,9 +292,6 @@ def generate_plans_for_batch(batch_no: str) -> dict:
         groups: dict[str, int] = defaultdict(int)
 
         for price in prices:
-            if price.trip_type == TRIP_ROUND_TRIP:
-                skipped_count += 1
-                continue
             candidate = _candidate_from_price(db, price)
             if not candidate:
                 skipped_count += 1

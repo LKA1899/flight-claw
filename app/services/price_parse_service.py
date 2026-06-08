@@ -6,7 +6,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import PLATFORM_CTRIP, QUERY_DIRECT, QUERY_TRANSFER, STATUS_FAILED, STATUS_PARTIAL, STATUS_SUCCESS
+from app.constants import (
+    PLATFORM_CTRIP,
+    QUERY_DIRECT,
+    QUERY_TRANSFER,
+    STATUS_FAILED,
+    STATUS_PARTIAL,
+    STATUS_SKIPPED,
+    STATUS_SUCCESS,
+    TRIP_ROUND_TRIP,
+)
 from app.db import SessionLocal
 from app.models import FlightPriceRaw, FlightQueryTask
 from app.services.parser_pipeline import parse_ctrip_task_items
@@ -62,6 +71,16 @@ def parse_task_price(task_id: int) -> dict:
         task = db.get(FlightQueryTask, task_id)
         if not task:
             raise ValueError(f"Query task not found: {task_id}")
+        if task.trip_type == TRIP_ROUND_TRIP:
+            message = "Round-trip tasks are parsed through the round-trip pipeline; price raw parsing skipped"
+            _mark_task_parse(db, task, STATUS_SKIPPED, message)
+            return {
+                "task_id": task_id,
+                "parsed_count": 0,
+                "failed_count": 0,
+                "skipped_count": 1,
+                "warnings": [message],
+            }
 
         warnings: list[str] = []
         try:

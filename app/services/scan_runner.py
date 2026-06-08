@@ -20,6 +20,7 @@ from app.constants import (
     STATUS_SKIPPED,
     STATUS_SUCCESS,
     TRIGGER_MANUAL,
+    TRIP_ONE_WAY,
 )
 from app.crawler.ctrip import run_ctrip_task
 from app.db import SessionLocal
@@ -46,7 +47,11 @@ from app.services.plan_service import (
 from app.services.price_parse_service import parse_task_price
 from app.services.scan_service import create_scan, refresh_scan_counts
 from app.services.settings_service import get_scan_interval_range
-from app.services.task_service import generate_tasks_for_monitors, pending_ctrip_tasks_for_batch, successful_tasks_with_snapshot_for_batch
+from app.services.task_service import (
+    generate_tasks_for_monitors,
+    pending_ctrip_tasks_for_batch,
+    successful_oneway_tasks_with_snapshot_for_batch,
+)
 
 _dispatch_lock = threading.Lock()
 
@@ -54,7 +59,7 @@ _dispatch_lock = threading.Lock()
 SCAN_STEPS: list[tuple[str, str]] = [
     ("GENERATE_TASKS", "Generate query tasks"),
     ("RUN_BROWSER_SEARCH", "Run browser search"),
-    ("SAVE_SNAPSHOT", "Save snapshot"),
+    ("SUMMARIZE_SNAPSHOTS", "Summarize snapshots"),
     ("PARSE_RESULT", "Parse price results"),
     ("ANALYZE_RESULT", "Analyze results"),
     ("GENERATE_REPORT", "Generate report"),
@@ -276,7 +281,22 @@ class ScanPipeline:
         if int(self.context.get("generated_task_count") or 0) == 0:
             return {"message": "No generated tasks; price parsing skipped.", "total_task_count": 0, "status": STATUS_SKIPPED}
         with SessionLocal() as db:
-            tasks = successful_tasks_with_snapshot_for_batch(db, batch_no)
+            tasks = successful_oneway_tasks_with_snapshot_for_batch(db, batch_no)
+            skipped_roundtrip_task_count = db.scalar(
+                select(func.count(FlightQueryTask.id)).where(
+                    FlightQueryTask.batch_no == batch_no,
+                    FlightQueryTask.status == STATUS_SUCCESS,
+                    FlightQueryTask.trip_type != TRIP_ONE_WAY,
+                    FlightQueryTask.text_path.is_not(None),
+                )
+            ) or 0
+        if not tasks:
+            return {
+                "message": "No one-way SUCCESS tasks with text snapshot found for price parsing",
+                "total_task_count": 0,
+                "skipped_roundtrip_task_count": skipped_roundtrip_task_count,
+                "status": STATUS_SKIPPED,
+            }
         parsed_task_count = 0
         failed_task_count = 0
         total_price_item_count = 0
@@ -293,13 +313,12 @@ class ScanPipeline:
                 parsed_task_count += 1
             else:
                 failed_task_count += 1
-        if tasks and total_price_item_count == 0:
+        if total_price_item_count == 0:
             raise RuntimeError("No price items parsed from any task in this scan")
-        if not tasks and int(self.context.get("generated_task_count") or 0) > 0:
-            return {"message": "No SUCCESS tasks with text snapshot found for price parsing", "status": STATUS_SKIPPED}
         return {
             "batch_no": batch_no,
             "total_task_count": len(tasks),
+            "skipped_roundtrip_task_count": skipped_roundtrip_task_count,
             "parsed_task_count": parsed_task_count,
             "failed_task_count": failed_task_count,
             "total_price_item_count": total_price_item_count,
@@ -308,7 +327,7 @@ class ScanPipeline:
             "results": results,
         }
 
-    def _step_save_snapshot(self) -> dict:
+    def _step_summarize_snapshots(self) -> dict:
         batch_no = self.context.get("batch_no")
         if not batch_no:
             return {"message": "No batch_no in context; skipped.", "status": STATUS_SKIPPED}
@@ -321,7 +340,7 @@ class ScanPipeline:
             "total_task_count": len(tasks),
             "screenshot_count": screenshot_count,
             "text_count": text_count,
-            "message": "Snapshots are written by the browser search step and summarized here.",
+            "message": "Snapshot files were written during browser search; this step summarizes saved paths.",
         }
 
     def _step_analyze_result(self) -> dict:
@@ -353,7 +372,16 @@ class ScanPipeline:
             if not scan:
                 raise ValueError("Scan not found")
             batch_no = scan.batch_no
-            price_count = db.scalar(select(func.count(FlightPriceRaw.id)).where(FlightPriceRaw.batch_no == batch_no)) if batch_no else 0
+            price_count = (
+                db.scalar(
+                    select(func.count(FlightPriceRaw.id)).where(
+                        FlightPriceRaw.batch_no == batch_no,
+                        FlightPriceRaw.trip_type == TRIP_ONE_WAY,
+                    )
+                )
+                if batch_no
+                else 0
+            )
             best_items = list(db.scalars(select(FlightBestDaily).where(FlightBestDaily.batch_no == batch_no))) if batch_no else []
             roundtrip_plans = list(db.scalars(select(FlightRoundTripPlan).where(FlightRoundTripPlan.batch_no == batch_no))) if batch_no else []
             roundtrip_clues = list(db.scalars(select(FlightRoundTripOutbound).where(FlightRoundTripOutbound.batch_no == batch_no))) if batch_no else []
@@ -401,7 +429,12 @@ def _build_scan_notification(scan: FlightScan) -> tuple[str, str]:
     ]
     if scan.batch_no:
         with SessionLocal() as db:
-            price_count = db.scalar(select(func.count(FlightPriceRaw.id)).where(FlightPriceRaw.batch_no == scan.batch_no)) or 0
+            price_count = db.scalar(
+                select(func.count(FlightPriceRaw.id)).where(
+                    FlightPriceRaw.batch_no == scan.batch_no,
+                    FlightPriceRaw.trip_type == TRIP_ONE_WAY,
+                )
+            ) or 0
             best_count = db.scalar(select(func.count(FlightBestDaily.id)).where(FlightBestDaily.batch_no == scan.batch_no)) or 0
             plan_count = db.scalar(select(func.count(FlightRoundTripPlan.id)).where(FlightRoundTripPlan.batch_no == scan.batch_no)) or 0
             clue_count = db.scalar(select(func.count(FlightRoundTripOutbound.id)).where(FlightRoundTripOutbound.batch_no == scan.batch_no)) or 0
