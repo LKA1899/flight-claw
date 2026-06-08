@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import FlightMonitorDate
 from app.services.monitor_service import get_monitor
+from app.constants import TRIP_ONE_WAY, TRIP_ROUND_TRIP
 
 
 def parse_date(value: str) -> date:
@@ -29,7 +30,8 @@ def add_date(
     remark: str | None = None,
     return_date: date | None = None,
 ) -> bool:
-    get_monitor(db, monitor_id)
+    monitor = get_monitor(db, monitor_id)
+    _validate_monitor_date(monitor.trip_type, depart_date, return_date)
     item = FlightMonitorDate(
         monitor_id=monitor_id,
         depart_date=depart_date,
@@ -57,7 +59,7 @@ def batch_add_dates(
 ) -> tuple[int, int]:
     if end_date < start_date:
         raise ValueError("end_date must be greater than or equal to start_date")
-    get_monitor(db, monitor_id)
+    monitor = get_monitor(db, monitor_id)
     created = 0
     skipped = 0
 
@@ -67,6 +69,11 @@ def batch_add_dates(
         if not weekdays or current.isoweekday() in weekdays:
             depart_dates.append(current)
         current += timedelta(days=1)
+
+    if monitor.trip_type == TRIP_ROUND_TRIP and not (return_start_date and return_end_date):
+        raise ValueError("Round-trip monitor dates require return_start_date and return_end_date")
+    if monitor.trip_type == TRIP_ONE_WAY and (return_start_date or return_end_date):
+        raise ValueError("One-way monitor dates do not accept return date ranges")
 
     if return_start_date and return_end_date:
         return_dates: list[date] = []
@@ -78,6 +85,9 @@ def batch_add_dates(
 
         for d in depart_dates:
             for r in return_dates:
+                if r < d:
+                    skipped += 1
+                    continue
                 if add_date(db, monitor_id, d, return_date=r):
                     created += 1
                 else:
@@ -90,6 +100,15 @@ def batch_add_dates(
                 skipped += 1
 
     return created, skipped
+
+
+def _validate_monitor_date(trip_type: str, depart_date: date, return_date: date | None) -> None:
+    if return_date is not None and return_date < depart_date:
+        raise ValueError("return_date must be greater than or equal to depart_date")
+    if trip_type == TRIP_ONE_WAY and return_date is not None:
+        raise ValueError("One-way monitor dates cannot include return_date")
+    if trip_type == TRIP_ROUND_TRIP and return_date is None:
+        raise ValueError("Round-trip monitor dates require return_date")
 
 
 def delete_date(db: Session, date_id: int) -> int:

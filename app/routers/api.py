@@ -125,6 +125,12 @@ class DatePayload(BaseModel):
     return_date: date | None = None
     remark: str | None = None
 
+    @model_validator(mode="after")
+    def validate_date_order(self):
+        if self.return_date is not None and self.return_date < self.depart_date:
+            raise ValueError("return_date must be greater than or equal to depart_date")
+        return self
+
 
 class DateBatchPayload(BaseModel):
     start_date: date
@@ -148,6 +154,8 @@ class DateBatchPayload(BaseModel):
             raise ValueError("return_start_date and return_end_date must be provided together")
         if has_start and has_end and self.return_end_date < self.return_start_date:
             raise ValueError("return_end_date must be greater than or equal to return_start_date")
+        if has_start and self.return_end_date < self.start_date:
+            raise ValueError("return_end_date must be greater than or equal to start_date")
         return self
 
 

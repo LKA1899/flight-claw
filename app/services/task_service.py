@@ -1,6 +1,7 @@
 import secrets
 import json
 from datetime import datetime
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -103,6 +104,21 @@ def successful_tasks_with_snapshot_for_batch(db: Session, batch_no: str) -> list
             .where(
                 FlightQueryTask.batch_no == batch_no,
                 FlightQueryTask.status == STATUS_SUCCESS,
+                FlightQueryTask.text_path.is_not(None),
+            )
+            .order_by(FlightQueryTask.id)
+        )
+    )
+
+
+def successful_oneway_tasks_with_snapshot_for_batch(db: Session, batch_no: str) -> list[FlightQueryTask]:
+    return list(
+        db.scalars(
+            select(FlightQueryTask)
+            .where(
+                FlightQueryTask.batch_no == batch_no,
+                FlightQueryTask.status == STATUS_SUCCESS,
+                FlightQueryTask.trip_type == TRIP_ONE_WAY,
                 FlightQueryTask.text_path.is_not(None),
             )
             .order_by(FlightQueryTask.id)
@@ -231,6 +247,20 @@ def _add_roundtrip_task(db: Session, batch: FlightQueryBatch, monitor: FlightMon
     )
 
 
+def _dedupe_oneway_dates(dates: Iterable) -> tuple[list, int]:
+    unique_dates = []
+    seen_depart_dates: set = set()
+    duplicate_count = 0
+    for monitor_date in dates:
+        depart_date = monitor_date.depart_date
+        if depart_date in seen_depart_dates:
+            duplicate_count += 1
+            continue
+        seen_depart_dates.add(depart_date)
+        unique_dates.append(monitor_date)
+    return unique_dates, duplicate_count
+
+
 def generate_tasks_for_monitors(
     db: Session,
     monitors: list[FlightMonitor],
@@ -265,6 +295,12 @@ def generate_tasks_for_monitors(
                 f"Monitor {monitor.id} has no implemented query strategy enabled; no tasks can be generated"
             )
             continue
+        if monitor.trip_type == TRIP_ONE_WAY:
+            dates, duplicate_count = _dedupe_oneway_dates(dates)
+            if duplicate_count:
+                warnings.append(
+                    f"Monitor {monitor.id} has {duplicate_count} duplicate one-way date rows on the same depart_date; duplicate task generation was skipped"
+                )
         for monitor_date in dates:
             if monitor.trip_type == TRIP_ROUND_TRIP:
                 if not monitor_date.return_date:
