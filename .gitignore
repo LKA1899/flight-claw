@@ -17,8 +17,10 @@ data/fingerprint_state.json
 data/screenshots/
 data/html/
 data/text/
+data/xhr/
 data/browser_profile/
 data/debug/
+data/tmp/
 
 dist-deploy/
 *.tar.gz

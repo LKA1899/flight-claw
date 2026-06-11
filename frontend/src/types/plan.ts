@@ -21,6 +21,12 @@ export interface PlanResult {
   reason?: string | null;
   warning?: string | null;
   detail_json?: string | null;
+  airline?: string | null;
+  flight_no?: string | null;
+  depart_time?: string | null;
+  arrive_time?: string | null;
+  depart_airport?: string | null;
+  arrive_airport?: string | null;
   // Enriched round-trip clue fields (from detail_json)
   outbound_airline?: string | null;
   outbound_flight_no?: string | null;
@@ -28,6 +34,12 @@ export interface PlanResult {
   outbound_arrive_time?: string | null;
   outbound_depart_airport?: string | null;
   outbound_arrive_airport?: string | null;
+  return_airline?: string | null;
+  return_flight_no?: string | null;
+  return_depart_time?: string | null;
+  return_arrive_time?: string | null;
+  return_depart_airport?: string | null;
+  return_arrive_airport?: string | null;
   return_detail_status?: string | null;
   data_completeness?: string | null;
   // Enriched round-trip plan fields

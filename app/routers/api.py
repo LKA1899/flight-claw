@@ -51,6 +51,7 @@ from app.services.scan_service import scan_dict, step_log_dict
 from app.services.scheduler_service import refresh_scheduler
 from app.services.task_service import cancel_task, reset_task
 from app.services.city_code_service import seed_default_city_codes, sync_ourairports_city_codes
+from app.services.flight_identity_service import dedupe_plan_dicts
 from app.crawler.ctrip import run_ctrip_task
 from app.security.auth import get_current_user
 
@@ -406,8 +407,8 @@ def task_dict(item: FlightQueryTask) -> dict[str, Any]:
     }
 
 
-def price_dict(item: FlightPriceRaw) -> dict[str, Any]:
-    return {
+def price_dict(item: FlightPriceRaw, price_change: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = {
         "id": item.id,
         "task_id": item.task_id,
         "batch_no": item.batch_no,
@@ -441,6 +442,54 @@ def price_dict(item: FlightPriceRaw) -> dict[str, Any]:
         "parse_status": item.parse_status,
         "error_message": item.error_message,
         "create_time": dt(item.create_time),
+    }
+    if price_change:
+        result.update(price_change)
+    return result
+
+
+def price_change_dict(db: Session, item: FlightPriceRaw) -> dict[str, Any]:
+    previous = db.scalar(
+        select(FlightPriceRaw)
+        .where(
+            FlightPriceRaw.id != item.id,
+            FlightPriceRaw.monitor_id == item.monitor_id,
+            FlightPriceRaw.platform == item.platform,
+            FlightPriceRaw.trip_type == item.trip_type,
+            FlightPriceRaw.leg_type == item.leg_type,
+            FlightPriceRaw.query_type == item.query_type,
+            FlightPriceRaw.depart_date == item.depart_date,
+            FlightPriceRaw.return_date == item.return_date,
+            FlightPriceRaw.from_city == item.from_city,
+            FlightPriceRaw.to_city == item.to_city,
+            FlightPriceRaw.flight_no == item.flight_no,
+            FlightPriceRaw.depart_time == item.depart_time,
+            FlightPriceRaw.arrive_time == item.arrive_time,
+            FlightPriceRaw.depart_airport == item.depart_airport,
+            FlightPriceRaw.arrive_airport == item.arrive_airport,
+            FlightPriceRaw.transfer_count == item.transfer_count,
+            FlightPriceRaw.transfer_city == item.transfer_city,
+            or_(
+                FlightPriceRaw.create_time < item.create_time,
+                and_(FlightPriceRaw.create_time == item.create_time, FlightPriceRaw.id < item.id),
+            ),
+        )
+        .order_by(FlightPriceRaw.create_time.desc(), FlightPriceRaw.id.desc())
+    )
+    if not previous:
+        return {
+            "previous_price": None,
+            "price_delta": None,
+            "price_trend": 0,
+            "previous_price_time": None,
+        }
+    delta = item.price - previous.price
+    trend = -1 if delta < 0 else 1 if delta > 0 else 0
+    return {
+        "previous_price": previous.price,
+        "price_delta": round(delta, 2),
+        "price_trend": trend,
+        "previous_price_time": dt(previous.create_time),
     }
 
 
@@ -588,9 +637,15 @@ def plan_dict(item: FlightPlanResult) -> dict[str, Any]:
         "detail_json": item.detail_json,
         "create_time": dt(item.create_time),
     }
-    if source_type in {"ROUNDTRIP_CLUE", "ROUNDTRIP_PLAN"} and item.detail_json:
+    if item.detail_json:
         try:
             detail = json.loads(item.detail_json)
+            result["airline"] = detail.get("airline")
+            result["flight_no"] = detail.get("flight_no")
+            result["depart_time"] = detail.get("depart_time")
+            result["arrive_time"] = detail.get("arrive_time")
+            result["depart_airport"] = detail.get("depart_airport")
+            result["arrive_airport"] = detail.get("arrive_airport")
             result["data_completeness"] = detail.get("data_completeness")
             if source_type == "ROUNDTRIP_CLUE":
                 result["outbound_airline"] = detail.get("airline")
@@ -605,6 +660,18 @@ def plan_dict(item: FlightPlanResult) -> dict[str, Any]:
                 result["outbound_summary"] = detail.get("outbound_summary")
                 result["return_summary"] = detail.get("return_summary")
                 result["roundtrip_plan_id"] = detail.get("roundtrip_plan_id")
+                result["outbound_airline"] = detail.get("outbound_airline")
+                result["outbound_flight_no"] = detail.get("outbound_flight_no")
+                result["outbound_depart_time"] = detail.get("outbound_depart_time")
+                result["outbound_arrive_time"] = detail.get("outbound_arrive_time")
+                result["outbound_depart_airport"] = detail.get("outbound_depart_airport")
+                result["outbound_arrive_airport"] = detail.get("outbound_arrive_airport")
+                result["return_airline"] = detail.get("return_airline")
+                result["return_flight_no"] = detail.get("return_flight_no")
+                result["return_depart_time"] = detail.get("return_depart_time")
+                result["return_arrive_time"] = detail.get("return_arrive_time")
+                result["return_depart_airport"] = detail.get("return_depart_airport")
+                result["return_arrive_airport"] = detail.get("return_arrive_airport")
         except (json.JSONDecodeError, TypeError):
             pass
     return result
@@ -667,6 +734,13 @@ def best_dict(item: FlightBestDaily) -> dict[str, Any]:
     }
 
 
+def latest_best_daily_ids():
+    return (
+        select(func.max(FlightBestDaily.id))
+        .group_by(FlightBestDaily.monitor_id, FlightBestDaily.depart_date)
+    )
+
+
 def report_dict(item: FlightReport, include_content: bool = False) -> dict[str, Any]:
     data = {
         "id": item.id,
@@ -703,8 +777,20 @@ def overview(db: Session = Depends(get_db)):
         .where(FlightMonitor.schedule_enabled.is_(True), FlightMonitor.next_scan_time.is_not(None))
         .order_by(FlightMonitor.next_scan_time.asc())
     )
-    best_items = list(db.scalars(select(FlightBestDaily).options(selectinload(FlightBestDaily.monitor), selectinload(FlightBestDaily.best_plan)).order_by(FlightBestDaily.create_time.desc()).limit(6)))
-    price_drops = db.scalar(select(func.count(FlightBestDaily.id)).where(FlightBestDaily.price_trend < 0)) or 0
+    latest_best_ids = latest_best_daily_ids()
+    best_items = list(
+        db.scalars(
+            select(FlightBestDaily)
+            .options(selectinload(FlightBestDaily.monitor), selectinload(FlightBestDaily.best_plan))
+            .where(FlightBestDaily.id.in_(latest_best_ids))
+            .order_by(FlightBestDaily.create_time.desc())
+            .limit(6)
+        )
+    )
+    price_drops = db.scalar(
+        select(func.count(FlightBestDaily.id))
+        .where(FlightBestDaily.id.in_(latest_best_ids), FlightBestDaily.price_trend < 0)
+    ) or 0
     return ok(
         {
             "active_monitors": active_monitors,
@@ -1149,7 +1235,7 @@ def prices(page: int = 1, page_size: int = 20, batch_no: str | None = None, moni
     if max_price is not None:
         stmt = stmt.where(FlightPriceRaw.price <= max_price)
     rows, total = paginate(db, stmt, page, page_size)
-    return ok(page_result([price_dict(item) for item in rows], total, page, page_size))
+    return ok(page_result([price_dict(item, price_change_dict(db, item)) for item in rows], total, page, page_size))
 
 
 @router.get("/plans")
@@ -1234,6 +1320,8 @@ def plans(
 
     plan_rows = list(db.scalars(stmt))
     all_items: list[dict[str, Any]] = [plan_dict(p) for p in plan_rows]
+    all_items = dedupe_plan_dicts(all_items)
+    all_items.sort(key=lambda item: (float(item.get("total_price") or 0), -float(item.get("score") or 0)))
 
     total = len(all_items)
     p = max(1, page)
@@ -1352,8 +1440,18 @@ def roundtrip_plan_detail(plan_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/best")
-def best(page: int = 1, page_size: int = 20, batch_no: str | None = None, monitor_id: int | None = None, depart_date: str | None = None, db: Session = Depends(get_db)):
+def best(
+    page: int = 1,
+    page_size: int = 20,
+    batch_no: str | None = None,
+    monitor_id: int | None = None,
+    depart_date: str | None = None,
+    latest_only: bool = True,
+    db: Session = Depends(get_db),
+):
     stmt = select(FlightBestDaily).options(selectinload(FlightBestDaily.monitor), selectinload(FlightBestDaily.best_plan), selectinload(FlightBestDaily.cheapest_plan), selectinload(FlightBestDaily.safest_plan), selectinload(FlightBestDaily.aggressive_plan)).order_by(FlightBestDaily.create_time.desc())
+    if latest_only and not batch_no:
+        stmt = stmt.where(FlightBestDaily.id.in_(latest_best_daily_ids()))
     if batch_no:
         stmt = stmt.where(FlightBestDaily.batch_no == batch_no)
     if monitor_id:

@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePagedParams } from "@/lib/queryParams";
 import { RoundTripPlanCard } from "@/components/plans/RoundTripPlanCard";
 import { RoundTripClueCard } from "@/components/plans/RoundTripClueCard";
+import { PlanFlightMeta } from "@/components/plans/PlanFlightMeta";
 import type { PlanResult } from "@/types/plan";
 
 const TAB_ONEWAY = "oneway";
@@ -198,6 +199,17 @@ function Deal({ label, plan }: { label: string; plan?: PlanResult | null }) {
           <div className="mt-1 text-sm font-medium text-ink">{plan.title}</div>
           <div className="mt-0.5">
             <RouteText from={plan.from_city} to={plan.to_city} tripType={plan.trip_type} />
+          </div>
+          <div className="mt-2">
+            <PlanFlightMeta
+              label="航班"
+              airline={plan.airline}
+              flightNo={plan.flight_no}
+              departTime={plan.depart_time}
+              arriveTime={plan.arrive_time}
+              departAirport={plan.depart_airport}
+              arriveAirport={plan.arrive_airport}
+            />
           </div>
           <div className="mt-2 flex items-center justify-between">
             <PriceText value={plan.total_price} />

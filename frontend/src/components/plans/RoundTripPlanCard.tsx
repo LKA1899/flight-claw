@@ -5,6 +5,7 @@ import { RiskBadge } from "@/components/common/RiskBadge";
 import { RouteText } from "@/components/common/RouteText";
 import { formatMinutes } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { PlanFlightMeta } from "@/components/plans/PlanFlightMeta";
 
 const completenessLabels: Record<string, string> = {
   FULL_ROUND_TRIP: "完整数据",
@@ -41,15 +42,33 @@ export function RoundTripPlanCard({ plan }: { plan: PlanResult }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-2 md:grid-cols-2">
-          {plan.outbound_summary && (
+          <PlanFlightMeta
+            label="去程"
+            airline={plan.outbound_airline}
+            flightNo={plan.outbound_flight_no}
+            departTime={plan.outbound_depart_time}
+            arriveTime={plan.outbound_arrive_time}
+            departAirport={plan.outbound_depart_airport}
+            arriveAirport={plan.outbound_arrive_airport}
+          />
+          <PlanFlightMeta
+            label="返程"
+            airline={plan.return_airline}
+            flightNo={plan.return_flight_no}
+            departTime={plan.return_depart_time}
+            arriveTime={plan.return_arrive_time}
+            departAirport={plan.return_depart_airport}
+            arriveAirport={plan.return_arrive_airport}
+          />
+          {!plan.outbound_airline && plan.outbound_summary && (
             <div className="rounded-xl border border-border bg-[#fbf8f4] p-3">
-              <div className="text-xs text-stone-400 mb-1">去程</div>
+              <div className="text-xs text-stone-400 mb-1">去程摘要</div>
               <div className="text-sm font-medium text-ink">{plan.outbound_summary}</div>
             </div>
           )}
-          {plan.return_summary && (
+          {!plan.return_airline && plan.return_summary && (
             <div className="rounded-xl border border-border bg-[#fbf8f4] p-3">
-              <div className="text-xs text-stone-400 mb-1">返程</div>
+              <div className="text-xs text-stone-400 mb-1">返程摘要</div>
               <div className="text-sm font-medium text-ink">{plan.return_summary}</div>
             </div>
           )}

@@ -11,8 +11,9 @@ import { DataPagination } from "@/components/query/DataPagination";
 import { ListToolbar } from "@/components/query/ListToolbar";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDateTime, formatMinutes } from "@/lib/format";
+import { formatDateTime, formatMinutes, formatPrice } from "@/lib/format";
 import { usePagedParams } from "@/lib/queryParams";
+import type { PriceRaw } from "@/types/price";
 
 export function PriceListPage() {
   const qp = usePagedParams(20);
@@ -73,7 +74,10 @@ export function PriceListPage() {
                   <TableCell>{price.arrive_time || "-"}<div className="text-xs text-stone-500">{price.arrive_airport}</div></TableCell>
                   <TableCell>{formatMinutes(price.duration_minutes)}</TableCell>
                   <TableCell>{price.transfer_count ? `${price.transfer_count}${price.transfer_city ? ` · ${price.transfer_city}` : ""}` : "0"}</TableCell>
-                  <TableCell><PriceText value={price.price} /></TableCell>
+                  <TableCell>
+                    <PriceText value={price.price} />
+                    <PriceChange price={price} />
+                  </TableCell>
                   <TableCell>{price.baggage_info || "-"}</TableCell>
                   <TableCell><SnapshotLinks taskId={price.task_id} screenshot={price.source_screenshot_path} /></TableCell>
                   <TableCell>{formatDateTime(price.create_time)}</TableCell>
@@ -90,5 +94,21 @@ export function PriceListPage() {
         <EmptyState title="暂无价格快照" />
       )}
     </>
+  );
+}
+
+function PriceChange({ price }: { price: PriceRaw }) {
+  if (price.previous_price == null || price.price_delta == null) {
+    return <div className="mt-1 text-xs text-stone-400">首次记录</div>;
+  }
+  if (price.price_delta === 0) {
+    return <div className="mt-1 text-xs text-stone-500">较上次持平</div>;
+  }
+  const dropped = price.price_delta < 0;
+  return (
+    <div className={dropped ? "mt-1 text-xs text-green-600" : "mt-1 text-xs text-red-600"}>
+      较上次{dropped ? "降" : "涨"} {formatPrice(Math.abs(price.price_delta))}
+      {price.previous_price_time ? <span className="ml-1 text-stone-400">({formatDateTime(price.previous_price_time)})</span> : null}
+    </div>
   );
 }

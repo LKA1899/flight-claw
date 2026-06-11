@@ -5,6 +5,7 @@ import { RiskBadge } from "@/components/common/RiskBadge";
 import { RouteText } from "@/components/common/RouteText";
 import { formatMinutes } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { PlanFlightMeta } from "@/components/plans/PlanFlightMeta";
 
 const priceTypeLabels: Record<string, string> = {
   ONE_WAY_PRICE: "单程价",
@@ -37,6 +38,15 @@ export function PlanCard({ plan }: { plan: PlanResult }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        <PlanFlightMeta
+          label="航班"
+          airline={plan.airline}
+          flightNo={plan.flight_no}
+          departTime={plan.depart_time}
+          arriveTime={plan.arrive_time}
+          departAirport={plan.depart_airport}
+          arriveAirport={plan.arrive_airport}
+        />
         <div className="flex items-center gap-3 text-sm text-stone-600 flex-wrap">
           <RiskBadge risk={plan.risk_level} />
           {plan.total_duration_minutes != null && <span>{formatMinutes(plan.total_duration_minutes)}</span>}

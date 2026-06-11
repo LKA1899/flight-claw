@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { PlanFlightMeta } from "@/components/plans/PlanFlightMeta";
 
 export function OverviewPage() {
   const query = useQuery({ queryKey: ["overview"], queryFn: overviewApi.get });
@@ -39,6 +40,19 @@ export function OverviewPage() {
                 <div>
                   <div className="font-medium text-ink">{item.monitor_name || "关注路线"} · {item.depart_date}</div>
                   <p className="mt-1 text-sm text-stone-500">{item.summary || "已生成今日机会，建议查看候选方案和报告。"}</p>
+                  {item.best_plan ? (
+                    <div className="mt-2 max-w-md">
+                      <PlanFlightMeta
+                        label="推荐航班"
+                        airline={item.best_plan.airline}
+                        flightNo={item.best_plan.flight_no}
+                        departTime={item.best_plan.depart_time}
+                        arriveTime={item.best_plan.arrive_time}
+                        departAirport={item.best_plan.depart_airport}
+                        arriveAirport={item.best_plan.arrive_airport}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <PriceText value={item.best_price} trend={item.price_trend} />
               </div>

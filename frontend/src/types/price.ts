@@ -20,6 +20,10 @@ export interface PriceRaw {
   cabin_info?: string | null;
   baggage_info?: string | null;
   price: number;
+  previous_price?: number | null;
+  price_delta?: number | null;
+  price_trend?: number | null;
+  previous_price_time?: string | null;
   currency: string;
   source_html_path?: string | null;
   source_screenshot_path?: string | null;

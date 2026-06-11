@@ -292,7 +292,10 @@ def _classify_page_text(page: Page) -> str | None:
     except PlaywrightError:
         login_modal = False
 
-    text = _page_visible_text(page)
+    return _classify_visible_text(_page_visible_text(page), login_modal=login_modal)
+
+
+def _classify_visible_text(text: str, *, login_modal: bool = False) -> str | None:
     if not text:
         return PAGE_LOGIN_REQUIRED if login_modal else None
     lowered = text.lower()
@@ -304,10 +307,15 @@ def _classify_page_text(page: Page) -> str | None:
         "\u8bbf\u95ee\u5f02\u5e38",
         "\u7f51\u7edc\u73af\u5883\u5f02\u5e38",
         "\u8bf7\u5b8c\u6210\u9a8c\u8bc1",
+        "\u62e6\u622a",
         "verify",
         "verification",
         "risk control",
         "risk-control",
+        "whaleguard",
+        "whaleguard block",
+        "access denied",
+        "request blocked",
     ]
     login_keywords = [
         "\u8d26\u53f7\u5bc6\u7801\u767b\u5f55",
@@ -320,6 +328,8 @@ def _classify_page_text(page: Page) -> str | None:
     if login_modal or any(keyword.lower() in lowered for keyword in login_keywords):
         return PAGE_LOGIN_REQUIRED
     if any(keyword.lower() in lowered for keyword in verification_keywords):
+        return PAGE_VERIFICATION_REQUIRED
+    if len(lowered) <= 120 and any(keyword in lowered for keyword in ("block", "blocked", "deny", "denied", "forbidden")):
         return PAGE_VERIFICATION_REQUIRED
     return None
 
@@ -516,6 +526,25 @@ def _try_switch_to_roundtrip(page: Page) -> None:
         except PlaywrightError:
             continue
     log("unable to switch to round-trip mode automatically")
+
+
+def _warm_up_ctrip_session(page: Page, task_id: int | None = None) -> None:
+    log(f"warm up ctrip session: {CTRIP_FLIGHT_URL}")
+    try:
+        page.goto(CTRIP_FLIGHT_URL, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+        page.wait_for_timeout(1500)
+    except PlaywrightTimeoutError as exc:
+        _raise_page_error(PAGE_LOAD_TIMEOUT, f"warmup page navigation timed out: {exc}", page)
+    _raise_if_cancelled(task_id)
+    page_error_type = _classify_page_text(page)
+    if page_error_type == PAGE_VERIFICATION_REQUIRED:
+        _raise_page_error(page_error_type, "verification or risk-control page detected during warmup", page)
+    if page_error_type == PAGE_LOGIN_REQUIRED:
+        _raise_page_error(page_error_type, "login page detected during warmup", page)
+
+
+def _should_warm_up_session(browser_profile_settings: dict) -> bool:
+    return bool(browser_profile_settings.get("browser_warmup_enabled", False))
 
 
 def _wait_for_result_or_fail(page: Page, task_id: int | None = None) -> None:
@@ -888,6 +917,8 @@ def _run_ctrip_attempt(
                 if task_data["trip_type"] == TRIP_ROUND_TRIP
                 else _build_list_url(type("TaskStub", (), task_data))
             )
+            if _should_warm_up_session(browser_profile_settings):
+                _warm_up_ctrip_session(page, task_id)
             log(f"open result page: {target_url}")
             try:
                 page.goto(target_url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
@@ -926,7 +957,7 @@ def _run_ctrip_attempt(
                         profile,
                         runtime_meta,
                     )
-        except Exception:
+        except Exception as exc:
             if xhr_capture:
                 xhr_path = xhr_capture.finalize()
             screenshot_path, text_path = _try_capture_failure_artifacts(
@@ -937,6 +968,12 @@ def _run_ctrip_attempt(
                 profile=profile,
                 runtime_meta=runtime_meta,
             )
+            if screenshot_path:
+                setattr(exc, "screenshot_path", screenshot_path)
+            if text_path:
+                setattr(exc, "text_path", text_path)
+            if xhr_path:
+                setattr(exc, "xhr_path", xhr_path)
             raise
         if xhr_capture:
             xhr_path = xhr_capture.finalize()
@@ -1039,6 +1076,9 @@ def run_ctrip_task(task_id: int) -> dict:
                     roundtrip_expand_result = attempt_result["roundtrip_expand_result"]
                     break
                 except Exception as exc:
+                    screenshot_path = getattr(exc, "screenshot_path", screenshot_path)
+                    text_path = getattr(exc, "text_path", text_path)
+                    xhr_path = getattr(exc, "xhr_path", xhr_path)
                     error_message = _build_failure_message(exc)
                     error_type = _error_type_from_message(error_message)
                     last_error_message = error_message

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.constants import QUERY_DIRECT, QUERY_HIDDEN_CITY, RISK_HIGH, RISK_LOW, RISK_MEDIUM, TRIP_ROUND_TRIP
 from app.db import SessionLocal
 from app.models import FlightBestDaily, FlightPlanResult
+from app.services.flight_identity_service import dedupe_plan_results
 
 RISK_RANK = {RISK_LOW: 0, RISK_MEDIUM: 1, RISK_HIGH: 2}
 
@@ -65,6 +66,7 @@ def analyze_best_daily(batch_no: str) -> dict:
                 .order_by(FlightPlanResult.monitor_id, FlightPlanResult.depart_date, FlightPlanResult.score.desc())
             )
         )
+        plans = dedupe_plan_results(plans)
         grouped: dict[tuple[int, date], list[FlightPlanResult]] = defaultdict(list)
         for plan in plans:
             grouped[(plan.monitor_id, plan.depart_date)].append(plan)

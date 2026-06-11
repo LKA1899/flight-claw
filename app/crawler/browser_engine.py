@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,10 @@ from app.services.settings_service import get_browser_profile_settings
 
 
 PROFILE_LOCK_FILE_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
+WINDOWS_CHROME_PATHS = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+)
 
 
 @dataclass
@@ -90,9 +95,26 @@ class BrowserProfile:
             merged_headers.update(base_headers)
         else:
             merged_headers = base_headers
+        configured_executable_path = str(settings.get("executable_path") or "").strip() or None
+        resolved_executable_path = (
+            executable_path
+            or os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")
+            or configured_executable_path
+            or _detect_installed_chrome_path(settings)
+        )
+        configured_user_agent = str(settings.get("user_agent") or "").strip() or None
+        force_fingerprint_user_agent = bool(settings.get("force_fingerprint_user_agent", False))
+        if fingerprint and force_fingerprint_user_agent:
+            resolved_user_agent = fingerprint.user_agent
+        elif configured_user_agent:
+            resolved_user_agent = configured_user_agent
+        elif fingerprint:
+            resolved_user_agent = fingerprint.user_agent
+        else:
+            resolved_user_agent = None
         return cls(
             headless=headless,
-            executable_path=executable_path or os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH") or None,
+            executable_path=resolved_executable_path,
             fingerprint_name=fingerprint.name if fingerprint else "custom",
             profile_key=fingerprint.name if fingerprint and str(settings.get("fingerprint_profile_strategy") or "pool") == "pool" else None,
             fingerprint_mode=fingerprint_mode,
@@ -105,7 +127,7 @@ class BrowserProfile:
             viewport_width=fingerprint.viewport_width if fingerprint else int(settings.get("viewport_width") or 1440),
             viewport_height=fingerprint.viewport_height if fingerprint else int(settings.get("viewport_height") or 900),
             device_scale_factor=fingerprint.device_scale_factor if fingerprint else float(settings.get("device_scale_factor") or 1.0),
-            user_agent=fingerprint.user_agent if fingerprint else (str(settings.get("user_agent") or "") or None),
+            user_agent=resolved_user_agent,
             extra_headers=merged_headers,
             block_resource_types=set(settings.get("block_resource_types") or []),
             blocked_domains=set(settings.get("blocked_domains") or []),
@@ -142,7 +164,19 @@ class BrowserProfile:
             "viewport": f"{self.viewport_width}x{self.viewport_height}",
             "device_scale_factor": self.device_scale_factor,
             "user_agent": self.user_agent,
+            "executable_path": self.executable_path,
         }
+
+
+def _detect_installed_chrome_path(settings: dict) -> str | None:
+    if not bool(settings.get("prefer_installed_chrome", True)):
+        return None
+    if sys.platform != "win32":
+        return None
+    for path in WINDOWS_CHROME_PATHS:
+        if Path(path).exists():
+            return path
+    return None
 
 
 def profile_dir_candidates(task_id: int, profile: BrowserProfile) -> list[tuple[str, Path, bool]]:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from hashlib import sha256
 from random import Random
+import sys
 
 
 @dataclass(frozen=True)
@@ -99,21 +100,29 @@ def select_browser_fingerprint(
     penalty_index: int = 0,
 ) -> BrowserFingerprint:
     normalized_mode = (mode or "fixed").strip().lower()
+    pool = _platform_compatible_pool()
     if normalized_mode == "fixed":
-        return FINGERPRINT_POOL[0]
+        return pool[0]
     if normalized_mode == "per_monitor_daily" and monitor_id is not None and date_bucket:
-        return FINGERPRINT_POOL[_stable_index(f"monitor:{monitor_id}:day:{date_bucket}:penalty:{penalty_index}")]
+        return pool[_stable_index(f"monitor:{monitor_id}:day:{date_bucket}", len(pool), penalty_index)]
     if normalized_mode == "per_monitor" and monitor_id is not None:
-        return FINGERPRINT_POOL[_stable_index(f"monitor:{monitor_id}:penalty:{penalty_index}")]
+        return pool[_stable_index(f"monitor:{monitor_id}", len(pool), penalty_index)]
     if normalized_mode == "per_route" and route_key:
-        return FINGERPRINT_POOL[_stable_index(f"route:{route_key}:penalty:{penalty_index}")]
+        return pool[_stable_index(f"route:{route_key}", len(pool), penalty_index)]
     if normalized_mode == "random_pool":
-        return FINGERPRINT_POOL[Random().randrange(len(FINGERPRINT_POOL))]
+        return pool[Random().randrange(len(pool))]
     if task_id is not None:
-        return FINGERPRINT_POOL[_stable_index(f"task:{task_id}")]
-    return FINGERPRINT_POOL[0]
+        return pool[_stable_index(f"task:{task_id}", len(pool))]
+    return pool[0]
 
 
-def _stable_index(seed_text: str) -> int:
+def _platform_compatible_pool() -> tuple[BrowserFingerprint, ...]:
+    if sys.platform == "win32":
+        windows_pool = tuple(item for item in FINGERPRINT_POOL if item.name.startswith("win_"))
+        return windows_pool or FINGERPRINT_POOL
+    return FINGERPRINT_POOL
+
+
+def _stable_index(seed_text: str, pool_size: int, penalty_index: int = 0) -> int:
     digest = sha256(seed_text.encode("utf-8")).hexdigest()
-    return int(digest[:8], 16) % len(FINGERPRINT_POOL)
+    return (int(digest[:8], 16) + max(0, penalty_index)) % pool_size
