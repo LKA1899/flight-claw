@@ -100,7 +100,6 @@ def scan_dict(item: FlightScan) -> dict[str, Any]:
         "start_time": item.start_time.isoformat() if item.start_time else None,
         "end_time": item.end_time.isoformat() if item.end_time else None,
         "duration_seconds": int((item.end_time - item.start_time).total_seconds()) if item.start_time and item.end_time else None,
-        "report_id": item.report_id,
         "error_message": item.error_message,
         "create_time": item.create_time.isoformat() if item.create_time else None,
     }

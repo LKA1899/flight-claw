@@ -1,5 +1,4 @@
 import type { QueryTask } from "@/types/task";
-import type { Report } from "@/types/report";
 
 export interface Scan {
   id: number;
@@ -19,7 +18,6 @@ export interface Scan {
   start_time?: string | null;
   end_time?: string | null;
   duration_seconds?: number | null;
-  report_id?: number | null;
   error_message?: string | null;
   create_time?: string | null;
 }
@@ -43,5 +41,23 @@ export interface ScanDetail {
   scan: Scan;
   steps: ScanStepLog[];
   tasks: QueryTask[];
-  report?: Report | null;
+}
+
+export interface ScanOption {
+  scan_id: number;
+  scan_no: string;
+  batch_no?: string | null;
+  monitor_id?: number | null;
+  monitor_name?: string | null;
+  from_city?: string | null;
+  to_city?: string | null;
+  route_label: string;
+  label: string;
+  start_time?: string | null;
+  create_time?: string | null;
+  trigger_type: string;
+  status: string;
+  total_task_count: number;
+  success_task_count: number;
+  failed_task_count: number;
 }

@@ -10,6 +10,7 @@ import { RouteCell } from "@/components/common/RouteCell";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { DataPagination } from "@/components/query/DataPagination";
 import { ListToolbar } from "@/components/query/ListToolbar";
+import { MonitorFilterSelect } from "@/components/query/MonitorFilterSelect";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,7 +36,7 @@ export function RoundTripResultsPage() {
       <PageHeader title="往返结果" description="区分去程候选、往返起价和完整组合，避免把不完整数据作为最终推荐。" />
       <Tabs value={tab} onValueChange={setTab} className="space-y-5">
         <TabsList><TabsTrigger value="outbounds">去程候选</TabsTrigger><TabsTrigger value="plans">完整组合</TabsTrigger></TabsList>
-        <ListToolbar onReset={qp.reset} onRefresh={() => tab === "outbounds" ? outbounds.refetch() : plans.refetch()} filters={<><Input placeholder="task_id" value={String(params.task_id || "")} onChange={(e) => qp.setValue("task_id", e.target.value)} className="w-36" /><Input placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(e) => qp.setValue("monitor_id", e.target.value)} className="w-36" /><Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(e) => qp.setValue("batch_no", e.target.value)} className="w-56" /></>} />
+        <ListToolbar onReset={qp.reset} onRefresh={() => tab === "outbounds" ? outbounds.refetch() : plans.refetch()} filters={<><MonitorFilterSelect value={String(qp.params.monitor_id || "")} onChange={(value) => qp.setValue("monitor_id", value)} /><Input placeholder="task_id" value={String(params.task_id || "")} onChange={(e) => qp.setValue("task_id", e.target.value)} className="w-36" /><Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(e) => qp.setValue("batch_no", e.target.value)} className="w-56" /></>} />
         <TabsContent value="outbounds">
           {outbounds.isLoading ? <LoadingState /> : outbounds.isError ? <ErrorState error={outbounds.error} /> : outbounds.data!.items.length ? (
             <div className="table-shell">

@@ -16,10 +16,9 @@ import { BatchListPage } from "@/pages/batches/BatchListPage";
 import { TaskListPage } from "@/pages/tasks/TaskListPage";
 import { PriceListPage } from "@/pages/prices/PriceListPage";
 import { PlanListPage } from "@/pages/plans/PlanListPage";
+import { ResultsPage } from "@/pages/results/ResultsPage";
 import { RoundTripResultsPage } from "@/pages/roundtrips/RoundTripResultsPage";
 import { BestDealListPage } from "@/pages/best/BestDealListPage";
-import { ReportListPage } from "@/pages/reports/ReportListPage";
-import { ReportDetailPage } from "@/pages/reports/ReportDetailPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 
 export const router = createBrowserRouter([
@@ -50,10 +49,9 @@ export const router = createBrowserRouter([
       { path: "tasks", element: <TaskListPage /> },
       { path: "prices", element: <PriceListPage /> },
       { path: "plans", element: <PlanListPage /> },
+      { path: "results", element: <ResultsPage /> },
       { path: "round-trips", element: <RoundTripResultsPage /> },
       { path: "best", element: <BestDealListPage /> },
-      { path: "reports", element: <ReportListPage /> },
-      { path: "reports/:id", element: <ReportDetailPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },

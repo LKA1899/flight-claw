@@ -40,7 +40,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="设置" description="浏览器模式、通知和 LLM 配置。" />
+      <PageHeader title="设置" description="浏览器模式、通知和本地存储配置。" />
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader><CardTitle>Browser</CardTitle></CardHeader>
@@ -129,24 +129,6 @@ export function SettingsPage() {
             <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
               <span className="text-stone-500">企业微信</span>
               <span className="ml-3 font-medium">{data.notification.wecom_configured ? "已配置" : "未配置"}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle>LLM</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
-              <span className="text-stone-500">状态</span>
-              <span className="ml-3 font-medium">{data.llm.configured ? "已配置" : "未配置"}</span>
-            </div>
-            <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
-              <span className="text-stone-500">Base URL</span>
-              <span className="ml-3 font-medium text-ink">{String(data.llm.base_url)}</span>
-            </div>
-            <div className="rounded-xl bg-[#fbf8f4] p-3 text-sm">
-              <span className="text-stone-500">Model</span>
-              <span className="ml-3 font-medium text-ink">{String(data.llm.model)}</span>
             </div>
           </CardContent>
         </Card>

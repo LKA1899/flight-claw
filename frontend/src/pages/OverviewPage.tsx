@@ -39,7 +39,7 @@ export function OverviewPage() {
               <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-[#fbf8f4] p-4">
                 <div>
                   <div className="font-medium text-ink">{item.monitor_name || "关注路线"} · {item.depart_date}</div>
-                  <p className="mt-1 text-sm text-stone-500">{item.summary || "已生成今日机会，建议查看候选方案和报告。"}</p>
+                  <p className="mt-1 text-sm text-stone-500">{item.summary || "已生成今日机会，建议查看候选方案。"}</p>
                   {item.best_plan ? (
                     <div className="mt-2 max-w-md">
                       <PlanFlightMeta

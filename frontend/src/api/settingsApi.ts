@@ -12,7 +12,6 @@ export interface SettingsData {
   };
   storage: Record<string, unknown>;
   notification: Record<string, unknown>;
-  llm: Record<string, unknown>;
   safety_policy: string[];
 }
 

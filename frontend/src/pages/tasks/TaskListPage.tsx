@@ -13,6 +13,7 @@ import { TaskActionMenu } from "@/components/tasks/TaskActionMenu";
 import { ListToolbar } from "@/components/query/ListToolbar";
 import { FilterSelect } from "@/components/query/FilterSelect";
 import { DataPagination } from "@/components/query/DataPagination";
+import { MonitorFilterSelect } from "@/components/query/MonitorFilterSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -42,9 +43,9 @@ export function TaskListPage() {
         onRefresh={() => query.refetch()}
         filters={
           <>
+            <MonitorFilterSelect value={String(qp.params.monitor_id || "")} onChange={(value) => qp.setValue("monitor_id", value)} />
             <Input placeholder="scan_id" value={String(qp.params.scan_id || "")} onChange={(event) => qp.setValue("scan_id", event.target.value)} className="w-28 shrink-0" />
             <Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(event) => qp.setValue("batch_no", event.target.value)} className="w-40 shrink-0" />
-            <Input placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(event) => qp.setValue("monitor_id", event.target.value)} className="w-28 shrink-0" />
             <FilterSelect value={String(qp.params.trip_type || "")} onChange={(value) => qp.setValue("trip_type", value)} options={[{ value: "ONE_WAY", label: "单程" }, { value: "ROUND_TRIP", label: "往返" }]} placeholder="行程类型" />
             <FilterSelect value={String(qp.params.status || "")} onChange={(value) => qp.setValue("status", value)} options={STATUS_OPTIONS.map((item) => ({ value: item, label: item }))} placeholder="状态" />
             <FilterSelect value={String(qp.params.platform || "")} onChange={(value) => qp.setValue("platform", value)} options={PLATFORM_OPTIONS} placeholder="平台" />

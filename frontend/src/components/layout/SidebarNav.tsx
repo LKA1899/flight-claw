@@ -1,8 +1,9 @@
-import { Activity, FileText, Home, Plane, Radar, Repeat2, Route, Settings, Sparkles, Table2 } from "lucide-react";
+import { Activity, Home, Plane, Radar, Repeat2, Route, SearchCheck, Settings, Sparkles, Table2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const items = [
+  { to: "/results", label: "扫描结果", icon: SearchCheck },
   { to: "/overview", label: "今日雷达", icon: Home },
   { to: "/monitors", label: "关注路线", icon: Route },
   { to: "/scans", label: "扫描记录", icon: Activity },
@@ -11,7 +12,6 @@ const items = [
   { to: "/round-trips", label: "往返结果", icon: Repeat2 },
   { to: "/plans", label: "候选方案", icon: Plane },
   { to: "/best", label: "今日机会", icon: Sparkles },
-  { to: "/reports", label: "旅行报告", icon: FileText },
   { to: "/settings", label: "设置", icon: Settings },
 ];
 

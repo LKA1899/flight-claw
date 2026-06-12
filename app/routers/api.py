@@ -36,7 +36,6 @@ from app.models import (
     FlightPriceRaw,
     FlightQueryBatch,
     FlightQueryTask,
-    FlightReport,
     FlightRoundTripOutbound,
     FlightRoundTripPlan,
     FlightRoundTripReturn,
@@ -263,6 +262,48 @@ def prioritize_plan_dicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped = dedupe_plan_dicts(items)
     deduped.sort(key=lambda item: (float(item.get("total_price") or 0), -float(item.get("score") or 0)))
     return deduped
+
+
+def scan_option_dict(item: FlightScan) -> dict[str, Any]:
+    started_at = item.start_time or item.create_time
+    scan_time = started_at.strftime("%Y-%m-%d %H:%M") if started_at else "-"
+    trigger_label = {
+        "MANUAL": "手动",
+        "SCHEDULED": "定时",
+        "SCAN": "扫描",
+    }.get(item.trigger_type, item.trigger_type)
+    status_label = {
+        "SUCCESS": "成功",
+        "FAILED": "失败",
+        "RUNNING": "运行中",
+        "PARTIAL_SUCCESS": "部分成功",
+        "CANCELLED": "已取消",
+        "QUEUED": "排队中",
+    }.get(item.status, item.status)
+    monitor_name = item.monitor.monitor_name if item.monitor else None
+    from_city = item.monitor.from_city if item.monitor else None
+    to_city = item.monitor.to_city if item.monitor else None
+    route_text = " -> ".join(part for part in [from_city, to_city] if part)
+    route_label = " / ".join(part for part in [monitor_name, route_text] if part) or "未关联路线"
+    task_summary = f"{item.success_task_count}/{item.total_task_count}"
+    return {
+        "scan_id": item.id,
+        "scan_no": item.scan_no,
+        "batch_no": item.batch_no,
+        "monitor_id": item.monitor_id,
+        "monitor_name": monitor_name,
+        "from_city": from_city,
+        "to_city": to_city,
+        "route_label": route_label,
+        "label": f"{scan_time} · {trigger_label} · {status_label} · {task_summary}",
+        "start_time": dt(item.start_time),
+        "create_time": dt(item.create_time),
+        "trigger_type": item.trigger_type,
+        "status": item.status,
+        "total_task_count": item.total_task_count,
+        "success_task_count": item.success_task_count,
+        "failed_task_count": item.failed_task_count,
+    }
 
 
 def monitor_dict(monitor: FlightMonitor, date_count: int | None = None, enabled_date_count: int | None = None) -> dict[str, Any]:
@@ -757,23 +798,6 @@ def latest_best_daily_ids():
     )
 
 
-def report_dict(item: FlightReport, include_content: bool = False) -> dict[str, Any]:
-    data = {
-        "id": item.id,
-        "scan_id": item.scan_id,
-        "monitor_id": item.monitor_id,
-        "batch_no": item.batch_no,
-        "title": item.title,
-        "llm_enabled": item.llm_enabled,
-        "llm_error_message": item.llm_error_message,
-        "create_time": dt(item.create_time),
-    }
-    if include_content:
-        data["content_md"] = item.content_md
-        data["llm_content_md"] = item.llm_content_md
-    return data
-
-
 @router.get("/overview")
 def overview(db: Session = Depends(get_db)):
     today = datetime.now().date()
@@ -1082,6 +1106,20 @@ def delete_transfer(transfer_id: int, db: Session = Depends(get_db)):
     return ok({"monitor_id": monitor_id, "deleted": True})
 
 
+@router.get("/scan-options")
+def scan_options(monitor_id: int | None = None, limit: int = Query(default=80, ge=1, le=200), db: Session = Depends(get_db)):
+    stmt = (
+        select(FlightScan)
+        .options(selectinload(FlightScan.monitor))
+        .where(FlightScan.batch_no.isnot(None))
+        .order_by(FlightScan.start_time.desc().nullslast(), FlightScan.id.desc())
+        .limit(limit)
+    )
+    if monitor_id:
+        stmt = stmt.where(FlightScan.monitor_id == monitor_id)
+    return ok([scan_option_dict(item) for item in db.scalars(stmt)])
+
+
 @router.get("/scans")
 def scans(page: int = 1, page_size: int = 20, keyword: str | None = None, monitor_id: int | None = None, status: str | None = None, trigger_type: str | None = None, trip_type: str | None = None, start_date: str | None = None, end_date: str | None = None, db: Session = Depends(get_db)):
     stmt = select(FlightScan).options(selectinload(FlightScan.monitor)).order_by(FlightScan.id.desc())
@@ -1139,14 +1177,6 @@ def scan_steps(scan_id: int, db: Session = Depends(get_db)):
 def scan_tasks(scan_id: int, db: Session = Depends(get_db)):
     rows = db.scalars(select(FlightQueryTask).options(selectinload(FlightQueryTask.monitor)).where(FlightQueryTask.scan_id == scan_id).order_by(FlightQueryTask.id))
     return ok([task_dict(item) for item in rows])
-
-
-@router.get("/scans/{scan_id}/report")
-def scan_report(scan_id: int, db: Session = Depends(get_db)):
-    item = db.scalar(select(FlightReport).where(FlightReport.scan_id == scan_id).order_by(FlightReport.id.desc()))
-    if not item:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return ok(report_dict(item, include_content=True))
 
 
 @router.get("/batches")
@@ -1478,25 +1508,6 @@ def best(
     return ok(page_result([best_dict(item) for item in rows], total, page, page_size))
 
 
-@router.get("/reports")
-def reports(page: int = 1, page_size: int = 20, keyword: str | None = None, batch_no: str | None = None, db: Session = Depends(get_db)):
-    stmt = select(FlightReport).order_by(FlightReport.id.desc())
-    if keyword:
-        stmt = stmt.where(FlightReport.title.like(f"%{keyword}%"))
-    if batch_no:
-        stmt = stmt.where(FlightReport.batch_no == batch_no)
-    rows, total = paginate(db, stmt, page, page_size)
-    return ok(page_result([report_dict(item) for item in rows], total, page, page_size))
-
-
-@router.get("/reports/{report_id}")
-def report_detail(report_id: int, db: Session = Depends(get_db)):
-    item = db.get(FlightReport, report_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return ok(report_dict(item, include_content=True))
-
-
 @router.get("/city-codes")
 def city_codes(page: int = 1, page_size: int = 100, platform: str = "CTRIP", keyword: str | None = None, enabled: bool | None = None, db: Session = Depends(get_db)):
     stmt = select(FlightCityCode).order_by(FlightCityCode.platform.asc(), FlightCityCode.city_name.asc())
@@ -1581,7 +1592,6 @@ def get_settings():
     interval_min_seconds, interval_max_seconds = get_scan_interval_range()
     pushplus = (os.getenv("PUSHPLUS_TOKEN") or "").strip()
     wework = (os.getenv("WEWORK_WEBHOOK_URL") or "").strip()
-    llm_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     return ok(
         {
             "browser": {
@@ -1601,11 +1611,6 @@ def get_settings():
             "notification": {
                 "pushplus_configured": bool(pushplus),
                 "wecom_configured": bool(wework),
-            },
-            "llm": {
-                "configured": bool(llm_key),
-                "base_url": (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1",
-                "model": (os.getenv("OPENAI_MODEL") or "").strip() or "gpt-4o-mini",
             },
             "safety_policy": [
                 "不绕过验证码",

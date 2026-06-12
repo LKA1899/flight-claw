@@ -9,6 +9,7 @@ import { RouteCell } from "@/components/common/RouteCell";
 import { SnapshotLinks } from "@/components/common/SnapshotLinks";
 import { DataPagination } from "@/components/query/DataPagination";
 import { ListToolbar } from "@/components/query/ListToolbar";
+import { MonitorFilterSelect } from "@/components/query/MonitorFilterSelect";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime, formatMinutes, formatPrice } from "@/lib/format";
@@ -23,14 +24,12 @@ export function PriceListPage() {
     <>
       <PageHeader title="价格快照" description="从页面可见文本解析出的结构化价格数据，来源保留截图用于追踪。" />
       <ListToolbar
-        keyword={String(qp.params.keyword || "")}
-        onKeywordChange={(value) => qp.setValue("keyword", value)}
         onReset={qp.reset}
         onRefresh={() => query.refetch()}
         filters={
           <>
+            <MonitorFilterSelect value={String(qp.params.monitor_id || "")} onChange={(value) => qp.setValue("monitor_id", value)} />
             <Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(event) => qp.setValue("batch_no", event.target.value)} className="w-56" />
-            <Input placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(event) => qp.setValue("monitor_id", event.target.value)} className="w-32" />
             <Input type="date" value={String(qp.params.depart_date || "")} onChange={(event) => qp.setValue("depart_date", event.target.value)} className="w-40" />
             <Input placeholder="min" value={String(qp.params.min_price || "")} onChange={(event) => qp.setValue("min_price", event.target.value)} className="w-24" />
             <Input placeholder="max" value={String(qp.params.max_price || "")} onChange={(event) => qp.setValue("max_price", event.target.value)} className="w-24" />

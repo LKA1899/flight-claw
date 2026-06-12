@@ -85,7 +85,7 @@ export function LoginPage() {
         <Card className="border-stone-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg">登录</CardTitle>
-            <p className="text-sm text-stone-500">登录后管理关注路线、扫描任务和旅行报告。</p>
+            <p className="text-sm text-stone-500">登录后管理关注路线、扫描任务和价格数据。</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">

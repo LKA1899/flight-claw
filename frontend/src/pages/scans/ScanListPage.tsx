@@ -11,6 +11,7 @@ import { DataPagination } from "@/components/query/DataPagination";
 import { DateRangeFilter } from "@/components/query/DateRangeFilter";
 import { FilterSelect } from "@/components/query/FilterSelect";
 import { ListToolbar } from "@/components/query/ListToolbar";
+import { MonitorFilterSelect } from "@/components/query/MonitorFilterSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -43,7 +44,7 @@ export function ScanListPage() {
 
   return (
     <>
-      <PageHeader title="扫描记录" description="每次手动或定时扫描都会生成一条记录，并保留任务、步骤日志和报告。" />
+      <PageHeader title="扫描记录" description="每次手动或定时扫描都会生成一条记录，并保留任务和步骤日志。" />
       <ListToolbar
         keyword={String(qp.params.keyword || "")}
         onKeywordChange={(value) => qp.setValue("keyword", value)}
@@ -51,7 +52,7 @@ export function ScanListPage() {
         onRefresh={() => query.refetch()}
         filters={
           <>
-            <Input placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(event) => qp.setValue("monitor_id", event.target.value)} className="w-32 shrink-0" />
+            <MonitorFilterSelect value={String(qp.params.monitor_id || "")} onChange={(value) => qp.setValue("monitor_id", value)} />
             <FilterSelect value={String(qp.params.status || "")} onChange={(value) => qp.setValue("status", value)} options={STATUS_OPTIONS.map((item) => ({ value: item, label: item }))} placeholder="状态" />
             <FilterSelect value={String(qp.params.trigger_type || "")} onChange={(value) => qp.setValue("trigger_type", value)} options={[{ value: "MANUAL", label: "手动" }, { value: "SCHEDULED", label: "定时" }]} placeholder="触发方式" />
             <FilterSelect value={String(qp.params.trip_type || "")} onChange={(value) => qp.setValue("trip_type", value)} options={[{ value: "ONE_WAY", label: "单程" }, { value: "ROUND_TRIP", label: "往返" }]} placeholder="行程类型" />
@@ -99,7 +100,6 @@ export function ScanListPage() {
                     <div className="flex flex-wrap gap-2">
                       <Button asChild size="sm" variant="secondary"><Link to={`/scans/${scan.id}`}>详情</Link></Button>
                       <Button asChild size="sm" variant="secondary"><Link to={`/tasks?scan_id=${scan.id}`}>任务</Link></Button>
-                      {scan.report_id ? <Button asChild size="sm" variant="secondary"><Link to={`/reports/${scan.report_id}`}>报告</Link></Button> : null}
                       {["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(scan.status) ? (
                         <Button size="sm" variant="outline" onClick={() => cancelScan.mutate(scan.id)} disabled={cancelScan.isPending}>停止</Button>
                       ) : null}

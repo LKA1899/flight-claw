@@ -22,7 +22,6 @@ export function ScanDetailPage() {
   const scanQuery = useQuery({ queryKey: ["scan", id], queryFn: () => scanApi.get(id) });
   const stepsQuery = useQuery({ queryKey: ["scan-steps", id], queryFn: () => scanApi.steps(id) });
   const tasksQuery = useQuery({ queryKey: ["scan-tasks", id], queryFn: () => scanApi.tasks(id) });
-  const reportQuery = useQuery({ queryKey: ["scan-report", id], queryFn: () => scanApi.report(id) });
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["scan", id] });
     queryClient.invalidateQueries({ queryKey: ["scan-steps", id] });
@@ -53,13 +52,12 @@ export function ScanDetailPage() {
   const tasks = tasksQuery.data || [];
   const failedTasks = tasks.filter((task) => task.status === "FAILED");
   const partialTasks = tasks.filter((task) => task.status === "PARTIAL_SUCCESS");
-  const report = reportQuery.data;
 
   return (
     <>
       <PageHeader
         title={scan.scan_no}
-        description="固定扫描管线的执行详情。这里用于排查生成任务、浏览器查询、解析、分析和报告生成。"
+        description="固定扫描管线的执行详情。这里用于排查生成任务、浏览器查询、解析和分析。"
         actions={
           <>
             <Button asChild variant="secondary"><Link to={`/tasks?scan_id=${scan.id}`}>查看任务</Link></Button>
@@ -69,7 +67,6 @@ export function ScanDetailPage() {
             {["FAILED", "CANCELLED", "PARTIAL_SUCCESS"].includes(scan.status) ? (
               <Button variant="outline" onClick={() => restartScan.mutate()} disabled={restartScan.isPending}>重新开始</Button>
             ) : null}
-            {report ? <Button asChild><Link to={`/reports/${report.id}`}>查看报告</Link></Button> : null}
           </>
         }
       />

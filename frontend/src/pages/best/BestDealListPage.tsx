@@ -11,6 +11,7 @@ import { RiskBadge } from "@/components/common/RiskBadge";
 import { RouteText } from "@/components/common/RouteText";
 import { ListToolbar } from "@/components/query/ListToolbar";
 import { DataPagination } from "@/components/query/DataPagination";
+import { MonitorFilterSelect } from "@/components/query/MonitorFilterSelect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -69,8 +70,8 @@ export function BestDealListPage() {
 
   const sharedFilters = (
     <>
+      <MonitorFilterSelect value={String(qp.params.monitor_id || "")} onChange={(value) => qp.setValue("monitor_id", value)} />
       <Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(e) => qp.setValue("batch_no", e.target.value)} className="w-56" />
-      <Input type="number" placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(e) => qp.setValue("monitor_id", e.target.value)} className="w-32" />
       <Input type="date" value={String(qp.params.depart_date || "")} onChange={(e) => qp.setValue("depart_date", e.target.value)} className="w-40" />
     </>
   );

@@ -45,7 +45,7 @@ export function TopBar() {
       <div className="flex h-16 items-center justify-between gap-4 px-6">
         <form className="relative hidden min-w-80 max-w-md flex-1 md:block" onSubmit={submitSearch}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索路线、扫描、批次、任务或报告" className="bg-white/80 pl-9" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索路线、扫描、批次或任务" className="bg-white/80 pl-9" />
         </form>
         <div className="ml-auto flex items-center gap-2">
           <StatusBadge status="ENABLED" className="hidden md:inline-flex">Local Mode</StatusBadge>

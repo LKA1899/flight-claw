@@ -29,7 +29,6 @@ from app.models import (
     FlightMonitor,
     FlightPriceRaw,
     FlightQueryTask,
-    FlightReport,
     FlightRoundTripOutbound,
     FlightRoundTripPlan,
     FlightScan,
@@ -62,7 +61,6 @@ SCAN_STEPS: list[tuple[str, str]] = [
     ("SUMMARIZE_SNAPSHOTS", "Summarize snapshots"),
     ("PARSE_RESULT", "Parse price results"),
     ("ANALYZE_RESULT", "Analyze results"),
-    ("GENERATE_REPORT", "Generate report"),
 ]
 
 
@@ -365,57 +363,6 @@ class ScanPipeline:
             "roundtrip_plan_count": roundtrip_plan_count,
             "roundtrip_clue_count": roundtrip_clue_count,
         }
-
-    def _step_generate_report(self) -> dict:
-        with SessionLocal() as db:
-            scan = db.get(FlightScan, self.scan_id)
-            if not scan:
-                raise ValueError("Scan not found")
-            batch_no = scan.batch_no
-            price_count = (
-                db.scalar(
-                    select(func.count(FlightPriceRaw.id)).where(
-                        FlightPriceRaw.batch_no == batch_no,
-                        FlightPriceRaw.trip_type == TRIP_ONE_WAY,
-                    )
-                )
-                if batch_no
-                else 0
-            )
-            best_items = list(db.scalars(select(FlightBestDaily).where(FlightBestDaily.batch_no == batch_no))) if batch_no else []
-            roundtrip_plans = list(db.scalars(select(FlightRoundTripPlan).where(FlightRoundTripPlan.batch_no == batch_no))) if batch_no else []
-            roundtrip_clues = list(db.scalars(select(FlightRoundTripOutbound).where(FlightRoundTripOutbound.batch_no == batch_no))) if batch_no else []
-            monitor_label = scan.monitor.monitor_name if scan.monitor else f"Monitor#{scan.monitor_id}"
-            title = f"{monitor_label} · {scan.scan_no}"
-            lines = [
-                f"# {title}",
-                "",
-                f"- 路线: {monitor_label}",
-                f"- Scan No: {scan.scan_no}",
-                f"- Batch No: {batch_no or '-'}",
-                f"- Trigger: {scan.trigger_type}",
-                f"- Tasks: {scan.success_task_count}/{scan.total_task_count} success, {scan.failed_task_count} failed, {scan.partial_task_count} partial",
-                f"- Price Rows: {price_count or 0}",
-                f"- Round-trip Plans: {len(roundtrip_plans)}",
-                f"- Round-trip Clues: {len(roundtrip_clues)}",
-            ]
-            if best_items:
-                lines.extend(["", "## Best Results"])
-                for item in best_items:
-                    lines.append(f"- {item.monitor.monitor_name if item.monitor else item.monitor_id} / {item.depart_date}: {item.summary or '-'}")
-            report = FlightReport(
-                scan_id=scan.id,
-                monitor_id=scan.monitor_id,
-                batch_no=batch_no,
-                title=title,
-                content_md="\n".join(lines),
-            )
-            db.add(report)
-            db.flush()
-            scan.report_id = report.id
-            db.commit()
-            return {"report_id": report.id, "title": title}
-
 
 def _build_scan_notification(scan: FlightScan) -> tuple[str, str]:
     monitor_label = scan.monitor.monitor_name if scan.monitor else f"Monitor#{scan.monitor_id}"

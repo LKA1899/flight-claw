@@ -71,6 +71,7 @@ export function RouteCard({ monitor, onDelete, onToggle, onScan, onCancelScan, s
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <Button asChild size="sm"><Link to={`/monitors/${monitor.id}`}>查看</Link></Button>
+        <Button asChild size="sm" variant="secondary"><Link to={`/results?monitor_id=${monitor.id}`}>结果</Link></Button>
         <Button asChild size="sm" variant="secondary"><Link to={`/monitors/${monitor.id}/edit#dates`}><Calendar className="h-4 w-4" />日期</Link></Button>
         {hasActiveScan && onCancelScan ? (
           <Button size="sm" variant="outline" onClick={onCancelScan}>停止扫描</Button>
