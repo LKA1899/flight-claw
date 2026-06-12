@@ -249,6 +249,22 @@ def parse_date(value: str | None) -> date | None:
     return datetime.strptime(value, "%Y-%m-%d").date() if value else None
 
 
+def resolve_batch_no(db: Session, value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    scan = db.scalar(select(FlightScan).where(FlightScan.scan_no == normalized))
+    return scan.batch_no if scan and scan.batch_no else normalized
+
+
+def prioritize_plan_dicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped = dedupe_plan_dicts(items)
+    deduped.sort(key=lambda item: (float(item.get("total_price") or 0), -float(item.get("score") or 0)))
+    return deduped
+
+
 def monitor_dict(monitor: FlightMonitor, date_count: int | None = None, enabled_date_count: int | None = None) -> dict[str, Any]:
     if date_count is None:
         date_count = len(monitor.dates or [])
@@ -1254,6 +1270,7 @@ def plans(
     latest_scan_only: bool = True,
     db: Session = Depends(get_db),
 ):
+    batch_no = resolve_batch_no(db, batch_no)
     scan_time_q = (
         select(
             FlightScan.batch_no,
@@ -1319,9 +1336,7 @@ def plans(
         stmt = stmt.where(FlightPlanResult.plan_type == "ROUNDTRIP_TICKET")
 
     plan_rows = list(db.scalars(stmt))
-    all_items: list[dict[str, Any]] = [plan_dict(p) for p in plan_rows]
-    all_items = dedupe_plan_dicts(all_items)
-    all_items.sort(key=lambda item: (float(item.get("total_price") or 0), -float(item.get("score") or 0)))
+    all_items = prioritize_plan_dicts([plan_dict(p) for p in plan_rows])
 
     total = len(all_items)
     p = max(1, page)
@@ -1449,6 +1464,7 @@ def best(
     latest_only: bool = True,
     db: Session = Depends(get_db),
 ):
+    batch_no = resolve_batch_no(db, batch_no)
     stmt = select(FlightBestDaily).options(selectinload(FlightBestDaily.monitor), selectinload(FlightBestDaily.best_plan), selectinload(FlightBestDaily.cheapest_plan), selectinload(FlightBestDaily.safest_plan), selectinload(FlightBestDaily.aggressive_plan)).order_by(FlightBestDaily.create_time.desc())
     if latest_only and not batch_no:
         stmt = stmt.where(FlightBestDaily.id.in_(latest_best_daily_ids()))
