@@ -21,6 +21,7 @@ import { RoundTripPlanCard } from "@/components/plans/RoundTripPlanCard";
 import { RoundTripClueCard } from "@/components/plans/RoundTripClueCard";
 import { PlanFlightMeta } from "@/components/plans/PlanFlightMeta";
 import type { PlanResult } from "@/types/plan";
+import type { ListParams } from "@/types/common";
 
 const TAB_ONEWAY = "oneway";
 const TAB_ROUNDTRIP = "roundtrip";
@@ -49,27 +50,27 @@ export function BestDealListPage() {
   };
 
   const oneWay = useQuery({
-    queryKey: ["best", qp.params],
-    queryFn: () => bestApi.list(qp.params),
+    queryKey: ["best", filteredParams(qp.params)],
+    queryFn: () => bestApi.list(filteredParams(qp.params)),
     enabled: tab === TAB_ONEWAY,
   });
 
   const roundTripPlans = useQuery({
-    queryKey: ["best-roundtrip-plans", qp.params],
-    queryFn: () => planApi.list({ ...qp.params, source_type: "ROUNDTRIP_PLAN", include_roundtrip_plans: true }),
+    queryKey: ["best-roundtrip-plans", filteredParams(qp.params)],
+    queryFn: () => planApi.list({ ...filteredParams(qp.params), source_type: "ROUNDTRIP_PLAN", include_roundtrip_plans: true }),
     enabled: tab === TAB_ROUNDTRIP && sub === SUB_PLANS,
   });
 
   const roundTripClues = useQuery({
-    queryKey: ["best-roundtrip-clues", qp.params],
-    queryFn: () => planApi.list({ ...qp.params, source_type: "ROUNDTRIP_CLUE" }),
+    queryKey: ["best-roundtrip-clues", filteredParams(qp.params)],
+    queryFn: () => planApi.list({ ...filteredParams(qp.params), source_type: "ROUNDTRIP_CLUE" }),
     enabled: tab === TAB_ROUNDTRIP && sub === SUB_CLUES,
   });
 
   const sharedFilters = (
     <>
       <Input placeholder="batch_no" value={String(qp.params.batch_no || "")} onChange={(e) => qp.setValue("batch_no", e.target.value)} className="w-56" />
-      <Input placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(e) => qp.setValue("monitor_id", e.target.value)} className="w-32" />
+      <Input type="number" placeholder="monitor_id" value={String(qp.params.monitor_id || "")} onChange={(e) => qp.setValue("monitor_id", e.target.value)} className="w-32" />
       <Input type="date" value={String(qp.params.depart_date || "")} onChange={(e) => qp.setValue("depart_date", e.target.value)} className="w-40" />
     </>
   );
@@ -188,6 +189,14 @@ export function BestDealListPage() {
       </Tabs>
     </>
   );
+}
+
+function filteredParams(params: ListParams): ListParams {
+  const next = { ...params };
+  if (next.monitor_id && !/^\d+$/.test(String(next.monitor_id))) {
+    delete next.monitor_id;
+  }
+  return next;
 }
 
 function Deal({ label, plan }: { label: string; plan?: PlanResult | null }) {
