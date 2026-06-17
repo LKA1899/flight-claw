@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 import random
 import string
 import time
@@ -11,8 +12,12 @@ CAPTCHA_LENGTH = 4
 CAPTCHA_TTL_SECONDS = 300  # 5 minutes
 CAPTCHA_WIDTH = 120
 CAPTCHA_HEIGHT = 40
+MAX_CAPTCHA_STORE_SIZE = int(os.getenv("MAX_CAPTCHA_STORE_SIZE", "200"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300"))
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "10"))
 
 _CAPTCHA_STORE: dict[str, tuple[str, float]] = {}  # captcha_id → (code, created_at)
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 
 
 def _clean_expired() -> None:
@@ -20,6 +25,12 @@ def _clean_expired() -> None:
     expired = [cid for cid, (_, ts) in _CAPTCHA_STORE.items() if now - ts > CAPTCHA_TTL_SECONDS]
     for cid in expired:
         del _CAPTCHA_STORE[cid]
+
+
+def _trim_store_to_capacity() -> None:
+    while len(_CAPTCHA_STORE) >= MAX_CAPTCHA_STORE_SIZE:
+        oldest = min(_CAPTCHA_STORE.items(), key=lambda item: item[1][1])[0]
+        del _CAPTCHA_STORE[oldest]
 
 
 def _random_code() -> str:
@@ -66,6 +77,7 @@ def _generate_image(code: str) -> bytes:
 
 def generate_captcha() -> dict:
     _clean_expired()
+    _trim_store_to_capacity()
     captcha_id = str(uuid.uuid4())
     code = _random_code()
     _CAPTCHA_STORE[captcha_id] = (code, time.time())
@@ -86,3 +98,17 @@ def verify_captcha(captcha_id: str, captcha_code: str) -> bool:
     # Consume the captcha after verification attempt
     del _CAPTCHA_STORE[captcha_id]
     return captcha_code.upper().strip() == stored_code.upper()
+
+
+def check_login_rate_limit(identifier: str) -> None:
+    now = time.time()
+    key = identifier.strip().lower() or "anonymous"
+    attempts = [ts for ts in _LOGIN_ATTEMPTS.get(key, []) if now - ts <= LOGIN_RATE_LIMIT_WINDOW_SECONDS]
+    if len(attempts) >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS:
+        raise ValueError("Too many login attempts. Please try again later.")
+    attempts.append(now)
+    _LOGIN_ATTEMPTS[key] = attempts
+
+
+def clear_login_rate_limit(identifier: str) -> None:
+    _LOGIN_ATTEMPTS.pop(identifier.strip().lower() or "anonymous", None)

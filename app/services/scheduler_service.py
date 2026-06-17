@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -10,6 +11,20 @@ from app.models import FlightMonitor, FlightScan
 from app.services.scan_runner import scan_monitor
 
 scheduler = BackgroundScheduler()
+MIN_SCHEDULE_INTERVAL_MINUTES = int(os.getenv("MIN_SCHEDULE_INTERVAL_MINUTES", "60"))
+
+
+def validate_schedule_cron(schedule_cron: str | None, timezone: str | None = None) -> None:
+    if not schedule_cron:
+        return
+    trigger = CronTrigger.from_crontab(schedule_cron, timezone=timezone or "Asia/Shanghai")
+    now = datetime.now(trigger.timezone)
+    first = trigger.get_next_fire_time(None, now)
+    second = trigger.get_next_fire_time(first, first) if first else None
+    if first and second:
+        interval_seconds = (second - first).total_seconds()
+        if interval_seconds < MIN_SCHEDULE_INTERVAL_MINUTES * 60:
+            raise ValueError(f"schedule cron is too frequent; minimum interval is {MIN_SCHEDULE_INTERVAL_MINUTES} minutes")
 
 
 def _run_scheduled_monitor_scan(monitor_id: int) -> None:
@@ -56,6 +71,7 @@ def _register_enabled_jobs() -> int:
         )
         for monitor in monitors:
             try:
+                validate_schedule_cron(monitor.schedule_cron, monitor.schedule_timezone)
                 trigger = CronTrigger.from_crontab(
                     monitor.schedule_cron,
                     timezone=monitor.schedule_timezone or "Asia/Shanghai",

@@ -3,14 +3,17 @@ import type { ApiResponse, ListParams } from "@/types/common";
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
 
-const TOKEN_KEY = "flight_scan_token";
+const CSRF_COOKIE_KEY = "flight_scan_csrf_token";
 
-function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+function getCookie(name: string): string | null {
+  const value = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith(`${name}=`))
+    ?.split("=")[1];
+  return value ? decodeURIComponent(value) : null;
 }
 
 function handleAuthError(): void {
-  localStorage.removeItem(TOKEN_KEY);
   const currentPath = window.location.pathname;
   if (currentPath !== "/login") {
     window.location.href = `/login?redirect=${encodeURIComponent(currentPath + window.location.search)}`;
@@ -24,13 +27,17 @@ function buildUrl(path: string, params?: ListParams | Record<string, unknown>) {
 }
 
 async function request<T>(path: string, init?: RequestInit, params?: ListParams | Record<string, unknown>): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  const method = (init?.method || "GET").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const csrfToken = getCookie(CSRF_COOKIE_KEY);
+    if (csrfToken) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
   }
   const response = await fetch(buildUrl(path, params), {
     headers: { ...headers, ...(init?.headers as Record<string, string> || {}) },
+    credentials: "include",
     ...init,
   });
   const contentType = response.headers.get("content-type") || "";

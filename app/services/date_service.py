@@ -1,3 +1,4 @@
+import os
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.models import FlightMonitorDate
 from app.services.monitor_service import get_monitor
 from app.constants import TRIP_ONE_WAY, TRIP_ROUND_TRIP
+
+MAX_BATCH_DATE_RANGE_DAYS = int(os.getenv("MAX_BATCH_DATE_RANGE_DAYS", "180"))
+MAX_ROUNDTRIP_DATE_COMBINATIONS = int(os.getenv("MAX_ROUNDTRIP_DATE_COMBINATIONS", "500"))
 
 
 def parse_date(value: str) -> date:
@@ -59,6 +63,8 @@ def batch_add_dates(
 ) -> tuple[int, int]:
     if end_date < start_date:
         raise ValueError("end_date must be greater than or equal to start_date")
+    if (end_date - start_date).days + 1 > MAX_BATCH_DATE_RANGE_DAYS:
+        raise ValueError(f"date range cannot exceed {MAX_BATCH_DATE_RANGE_DAYS} days")
     monitor = get_monitor(db, monitor_id)
     created = 0
     skipped = 0
@@ -76,12 +82,16 @@ def batch_add_dates(
         raise ValueError("One-way monitor dates do not accept return date ranges")
 
     if return_start_date and return_end_date:
+        if (return_end_date - return_start_date).days + 1 > MAX_BATCH_DATE_RANGE_DAYS:
+            raise ValueError(f"return date range cannot exceed {MAX_BATCH_DATE_RANGE_DAYS} days")
         return_dates: list[date] = []
         current = return_start_date
         while current <= return_end_date:
             if not weekdays or current.isoweekday() in weekdays:
                 return_dates.append(current)
             current += timedelta(days=1)
+        if len(depart_dates) * len(return_dates) > MAX_ROUNDTRIP_DATE_COMBINATIONS:
+            raise ValueError(f"date combinations cannot exceed {MAX_ROUNDTRIP_DATE_COMBINATIONS}")
 
         for d in depart_dates:
             for r in return_dates:

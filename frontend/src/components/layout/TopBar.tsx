@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from "react";
 import { LogOut, Play, Plus, Search, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { authApi, clearToken } from "@/api/authApi";
+import { authApi } from "@/api/authApi";
 
 export function TopBar() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
 
   const { data: user } = useQuery({
@@ -35,7 +36,7 @@ export function TopBar() {
 
   function handleLogout() {
     authApi.logout().finally(() => {
-      clearToken();
+      queryClient.removeQueries({ queryKey: ["auth-me"] });
       navigate("/login", { replace: true });
     });
   }

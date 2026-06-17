@@ -39,7 +39,14 @@ def _init_default_admin() -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="FlightScan")
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    production = app_env in {"production", "prod"}
+    app = FastAPI(
+        title="FlightScan",
+        docs_url=None if production else "/docs",
+        redoc_url=None if production else "/redoc",
+        openapi_url=None if production else "/openapi.json",
+    )
 
     cors_origins = os.getenv(
         "CORS_ORIGINS",

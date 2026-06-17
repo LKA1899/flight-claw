@@ -3,7 +3,14 @@ from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+_configured_secret = os.getenv("SECRET_KEY", "").strip()
+
+if APP_ENV in {"production", "prod"}:
+    if not _configured_secret or _configured_secret == "change-me" or len(_configured_secret) < 32:
+        raise RuntimeError("SECRET_KEY must be set to a strong random value in production")
+
+SECRET_KEY = _configured_secret or "change-me"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 

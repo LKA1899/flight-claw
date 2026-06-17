@@ -167,7 +167,7 @@ def _flight_rows(text: str) -> list[tuple[float, str]]:
 
 
 def _looks_like_flight_row(text: str) -> bool:
-    if not _flight_numbers(text):
+    if not _flight_numbers(text) and not _first(AIRLINE_RE, text):
         return False
     if "机场" not in text:
         return False

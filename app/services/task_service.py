@@ -1,5 +1,6 @@
 import secrets
 import json
+import os
 from datetime import datetime
 from collections.abc import Iterable
 
@@ -31,6 +32,8 @@ from app.models import FlightMonitor, FlightQueryBatch, FlightQueryTask
 from app.services.date_service import enabled_dates_for_monitor
 from app.services.positioning_service import enabled_positionings
 from app.services.transfer_service import enabled_transfers
+
+MAX_TASKS_PER_SCAN = int(os.getenv("MAX_TASKS_PER_SCAN", "500"))
 
 
 def make_batch_no() -> str:
@@ -279,6 +282,13 @@ def generate_tasks_for_monitors(
 
     task_count = 0
     warnings: list[str] = []
+
+    def increment_task_count() -> None:
+        nonlocal task_count
+        task_count += 1
+        if task_count > MAX_TASKS_PER_SCAN:
+            raise ValueError(f"Generated task count exceeds MAX_TASKS_PER_SCAN={MAX_TASKS_PER_SCAN}")
+
     for monitor in monitors:
         dates = enabled_dates_for_monitor(db, monitor.id)
         if not dates:
@@ -311,14 +321,14 @@ def generate_tasks_for_monitors(
                 if monitor.allow_transfer or monitor.allow_train_positioning:
                     warnings.append(
                         f"Monitor {monitor.id} is ROUND_TRIP; transfer and train positioning task generation is deferred, generated DIRECT round-trip only"
-                    )
+                )
                 _add_roundtrip_task(db, batch, monitor, monitor_date)
-                task_count += 1
+                increment_task_count()
                 continue
 
             for query_type in _query_types(monitor):
                 _add_oneway_task(db, batch, monitor, monitor_date.depart_date, query_type)
-                task_count += 1
+                increment_task_count()
             if monitor.allow_transfer:
                 transfers = enabled_transfers(db, monitor.id)
                 if not transfers:
@@ -326,7 +336,7 @@ def generate_tasks_for_monitors(
                         f"Monitor {monitor.id} has allow_transfer=true but no enabled transfer city; generated generic TRANSFER task"
                     )
                     _add_oneway_task(db, batch, monitor, monitor_date.depart_date, QUERY_TRANSFER)
-                    task_count += 1
+                    increment_task_count()
                 for transfer in transfers:
                     _add_oneway_task(
                         db,
@@ -336,7 +346,7 @@ def generate_tasks_for_monitors(
                         QUERY_TRANSFER,
                         transfer_city=transfer.transfer_city,
                     )
-                    task_count += 1
+                    increment_task_count()
             if monitor.allow_train_positioning:
                 positionings = enabled_positionings(db, monitor.id)
                 if not positionings:
@@ -350,7 +360,7 @@ def generate_tasks_for_monitors(
                         QUERY_TRAIN_PLUS_FLIGHT,
                         from_city=positioning.positioning_city,
                     )
-                    task_count += 1
+                    increment_task_count()
 
     batch.total_task_count = task_count
     if task_count == 0:

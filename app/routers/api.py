@@ -47,14 +47,14 @@ from app.services import date_service, monitor_service, positioning_service, tra
 from app.services.price_parse_service import parse_task_price
 from app.services.scan_runner import cancel_running_monitor_scan, cancel_scan, restart_scan, scan_monitor
 from app.services.scan_service import scan_dict, step_log_dict
-from app.services.scheduler_service import refresh_scheduler
+from app.services.scheduler_service import refresh_scheduler, validate_schedule_cron
 from app.services.task_service import cancel_task, reset_task
 from app.services.city_code_service import seed_default_city_codes, sync_ourairports_city_codes
 from app.services.flight_identity_service import dedupe_plan_dicts
 from app.crawler.ctrip import run_ctrip_task
-from app.security.auth import get_current_user
+from app.security.auth import require_admin
 
-router = APIRouter(prefix="/api", tags=["api"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api", tags=["api"], dependencies=[Depends(require_admin)])
 
 
 class ApiError(Exception):
@@ -951,6 +951,10 @@ def get_monitor_schedule(monitor_id: int, db: Session = Depends(get_db)):
 @router.put("/monitors/{monitor_id}/schedule")
 def update_monitor_schedule(monitor_id: int, payload: MonitorSchedulePayload, db: Session = Depends(get_db)):
     monitor = monitor_service.get_monitor(db, monitor_id)
+    try:
+        validate_schedule_cron(payload.schedule_cron, payload.schedule_timezone)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     monitor.schedule_enabled = payload.schedule_enabled
     monitor.schedule_cron = payload.schedule_cron
     monitor.schedule_timezone = payload.schedule_timezone or "Asia/Shanghai"
@@ -1589,13 +1593,14 @@ def get_settings():
     )
 
     s = load_settings()
+    production = os.getenv("APP_ENV", "development").strip().lower() in {"production", "prod"}
     interval_min_seconds, interval_max_seconds = get_scan_interval_range()
     pushplus = (os.getenv("PUSHPLUS_TOKEN") or "").strip()
     wework = (os.getenv("WEWORK_WEBHOOK_URL") or "").strip()
     return ok(
         {
             "browser": {
-                "profile_path": str(DATA_DIR / "browser_profile" / "ctrip"),
+                "profile_path": None if production else str(DATA_DIR / "browser_profile" / "ctrip"),
                 "headless": s.get("headless", False),
                 "query_interval": f"{interval_min_seconds}-{interval_max_seconds} seconds",
                 "scan_interval_min_seconds": interval_min_seconds,
@@ -1603,7 +1608,9 @@ def get_settings():
                 "scan_interval_min_allowed": SCAN_INTERVAL_MIN_ALLOWED,
                 "scan_interval_max_allowed": SCAN_INTERVAL_MAX_ALLOWED,
             },
-            "storage": {
+            "storage": None
+            if production
+            else {
                 "sqlite_path": str(DATA_DIR / "flight_claw.db"),
                 "screenshots_path": str(DATA_DIR / "screenshots"),
                 "text_path": str(DATA_DIR / "text"),

@@ -1,17 +1,25 @@
 import { useState, useEffect, useCallback, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plane, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { authApi, setToken, type CaptchaData } from "@/api/authApi";
+import { authApi, type CaptchaData } from "@/api/authApi";
+
+function safeRedirectPath(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/overview";
+  }
+  return value;
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/overview";
+  const redirect = safeRedirectPath(searchParams.get("redirect"));
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,9 +49,10 @@ export function LoginPage() {
         password,
         captcha_id: captcha?.captcha_id || "",
         captcha_code: captchaCode,
-      }),
+    }),
     onSuccess: (data) => {
-      setToken(data.access_token);
+      queryClient.setQueryData(["auth-me"], data.user);
+      queryClient.invalidateQueries({ queryKey: ["auth-me"] });
       toast.success("登录成功");
       navigate(redirect, { replace: true });
     },
